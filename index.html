@@ -3732,7 +3732,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     <Fragment>
       {open && <div className="fixed inset-0 z-30 sm:hidden no-print" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} />}
       <aside className={"fixed sm:static inset-y-0 left-0 z-40 w-72 shrink-0 flex flex-col transform transition-transform duration-200 sm:transform-none no-print " + (open ? "translate-x-0" : "-translate-x-full")} style={{ background: "var(--ink-900)" }}>
-        <div className="px-5 pt-6 pb-4">
+        <div className="px-5 pt-6 pb-4" style={{ paddingTop: "calc(1.5rem + env(safe-area-inset-top))" }}>
           <div className="flex items-center gap-3 mb-3">
             <div style={{ background: "#fff", borderRadius: 10, padding: 5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <img src={getLogo()} alt="Logo" style={{ height: 38, width: 38, objectFit: "contain" }} />
@@ -3907,7 +3907,7 @@ function App() {
       <MasterSidebar section={section} setSection={setSection} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} syncStatus={syncStatus} onRefreshAll={refreshAll} onOpenSettings={() => setShowSettings(true)} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="sm:hidden flex items-center gap-3 px-4 py-3 no-print" style={{ background: "var(--ink-900)" }}>
+        <div className="sm:hidden flex items-center gap-3 px-4 py-3 no-print" style={{ background: "var(--ink-900)", paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}>
           <button onClick={() => setMobileNavOpen(true)} aria-label="Abrir menú" style={{ color: "#fff" }}><Menu size={20} /></button>
           <div style={{ background: "#fff", borderRadius: 7, padding: 3, display: "flex", flexShrink: 0 }}>
             <img src={getLogo()} alt="Logo" style={{ height: 20, width: 20, objectFit: "contain" }} />
