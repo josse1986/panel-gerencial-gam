@@ -667,74 +667,34 @@ const CP_STATUS_META = {
 
 /* ---------------------------------- nuevo proyecto ---------------------------------- */
 
-function CP_NewProjectForm({ onCreate, onCancel }) {
-  const [form, setForm] = useState({ name: "", client: "", type: "", manager: "", startDate: todayISO(), ctrlStart: todayISO(), ctrlEnd: "", weeks: 20, budget: 100000 });
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const submit = (e) => {
-    e.preventDefault();
-    if (!form.name.trim() || !form.client.trim()) return;
-    onCreate(form);
-  };
+function CP_reschedulePhases(phases, startISO, endISO, totalBudget) {
+  const start = new Date(startISO + "T00:00:00");
+  const total = Math.max(1, daysBetween(startISO, endISO) + 1);
+  const wsum = phases.reduce((acc, p) => acc + (Number(p.weight) || 0), 0) || 100;
+  let cum = 0;
+  const out = phases.map((ph) => {
+    const prev = cum; cum += Number(ph.weight) || 0;
+    const sOff = Math.min(total - 1, Math.round((total * prev) / wsum));
+    const eOff = Math.min(total - 1, Math.max(sOff, Math.round((total * cum) / wsum) - 1));
+    return { ...ph, plannedStart: toISO(addDays(start, sOff)), plannedEnd: toISO(addDays(start, eOff)) };
+  });
+  const oldTotal = out.reduce((acc, p) => acc + (Number(p.budgetPlanned) || 0), 0);
+  const budget = Number(totalBudget) || 0;
+  if (budget > 0 && out.length && Math.abs(oldTotal - budget) > 0.005) {
+    const scaled = out.map((p) => ({ ...p, budgetPlanned: Math.round((oldTotal > 0 ? (Number(p.budgetPlanned) || 0) * (budget / oldTotal) : budget * ((Number(p.weight) || 0) / wsum)) * 100) / 100 }));
+    const sum = scaled.reduce((acc, p) => acc + p.budgetPlanned, 0);
+    scaled[scaled.length - 1].budgetPlanned = Math.round((scaled[scaled.length - 1].budgetPlanned + (budget - sum)) * 100) / 100;
+    return scaled;
+  }
+  return out;
+}
+
+function CP_EmptyState({ onNew }) {
   return (
-    <div className="max-w-2xl mx-auto py-10 px-6">
-      <h2 className="text-xl font-semibold mb-1" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>Nuevo proyecto</h2>
-      <p className="text-sm mb-6" style={{ color: "var(--text-600)" }}>Se generarán las 8 fases estándar del proceso, con fechas y presupuesto distribuidos automáticamente.</p>
-      <form onSubmit={submit} className="space-y-4">
-        <div>
-          <label className="field-label">Nombre del proyecto</label>
-          <input required className="field" value={form.name} onChange={set("name")} placeholder="Ej. Skid de bombeo — Planta Sur" />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="field-label">Cliente</label>
-            <input required className="field" value={form.client} onChange={set("client")} placeholder="Razón social del cliente" />
-          </div>
-          <div>
-            <label className="field-label">Tipo de proyecto</label>
-            <input list="tipos-proyecto" className="field" value={form.type} onChange={set("type")} placeholder="Selecciona o escribe" />
-            <datalist id="tipos-proyecto">
-              <option value="Fabricación de equipo" />
-              <option value="Montaje industrial" />
-              <option value="Mantenimiento mayor" />
-              <option value="Diseño y construcción (EPC)" />
-              <option value="Automatización" />
-            </datalist>
-          </div>
-        </div>
-        <div>
-          <label className="field-label">Responsable del proyecto</label>
-          <input className="field" value={form.manager} onChange={set("manager")} placeholder="Nombre del gerente o director de proyecto" />
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="field-label">Fecha de inicio</label>
-            <input type="date" className="field" value={form.startDate} onChange={set("startDate")} />
-          </div>
-          <div>
-            <label className="field-label">Duración estimada (semanas)</label>
-            <input type="number" min="1" className="field" value={form.weeks} onChange={set("weeks")} />
-          </div>
-          <div>
-            <label className="field-label">Presupuesto total (USD)</label>
-            <DecimalInput className="field" value={form.budget} onChange={(v) => setForm((f) => ({ ...f, budget: v }))} placeholder="0.00" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 p-3 rounded" style={{ background: "var(--steel-100)" }}>
-          <div>
-            <label className="field-label">Fecha de inicio (control gerencial)</label>
-            <input type="date" className="field" value={form.ctrlStart} onChange={set("ctrlStart")} />
-          </div>
-          <div>
-            <label className="field-label">Fecha de terminado (vacía mientras esté en ejecución)</label>
-            <input type="date" className="field" value={form.ctrlEnd} onChange={set("ctrlEnd")} />
-          </div>
-          <p className="text-xs col-span-2" style={{ color: "var(--text-600)" }}>Solo para control gerencial y filtros del Resumen general; no afectan las fechas de cada fase.</p>
-        </div>
-        <div className="flex gap-3 pt-2">
-          <button type="submit" className="btn-primary">Crear proyecto</button>
-          <button type="button" onClick={onCancel} className="btn-ghost">Cancelar</button>
-        </div>
-      </form>
+    <div className="max-w-xl mx-auto py-14 px-6 text-center">
+      <h2 className="text-lg font-semibold mb-2" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>Aún no hay proyectos</h2>
+      <p className="text-sm mb-5" style={{ color: "var(--text-600)" }}>Los proyectos nacen de una orden de trabajo: al emitirla se crean automáticamente aquí (con sus fases repartidas por días) y en el Calendario.</p>
+      <button onClick={onNew} className="btn-primary">Crear orden de trabajo</button>
     </div>
   );
 }
@@ -759,8 +719,9 @@ function CP_ProjectHeader({ project, rag, tab, setTab, onUpdateMeta }) {
             </div>
             <input className="field" value={form.manager} onChange={(e) => setForm({ ...form, manager: e.target.value })} placeholder="Responsable del proyecto" />
             <div className="grid grid-cols-2 gap-2">
-              <div><label className="field-label">Inicio (control gerencial)</label><input type="date" className="field" value={form.ctrlStart} onChange={(e) => setForm({ ...form, ctrlStart: e.target.value })} /></div>
-              <div><label className="field-label">Terminado (control gerencial)</label><input type="date" className="field" value={form.ctrlEnd} onChange={(e) => setForm({ ...form, ctrlEnd: e.target.value })} /></div>
+              <div><label className="field-label">Inicio (control gerencial)</label><input type="date" className="field" disabled={!!project.otId} value={form.ctrlStart} onChange={(e) => setForm({ ...form, ctrlStart: e.target.value })} /></div>
+              <div><label className="field-label">Terminado (control gerencial)</label><input type="date" className="field" disabled={!!project.otId} value={form.ctrlEnd} onChange={(e) => setForm({ ...form, ctrlEnd: e.target.value })} /></div>
+              {project.otId && <p className="text-xs col-span-2" style={{ color: COLORS.amberDark }}>Estas fechas las gobierna la Orden de trabajo N.º {project.otNumber || ""}: edítalas allí o en el Calendario.</p>}
             </div>
             <textarea className="field" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Notas u observaciones del proyecto…" />
             <div className="flex gap-2">
@@ -782,7 +743,7 @@ function CP_ProjectHeader({ project, rag, tab, setTab, onUpdateMeta }) {
             <p className="text-sm mt-0.5" style={{ color: "var(--text-600)" }}>{project.client} · {project.type || "Sin tipo definido"}{project.manager ? " · Responsable: " + project.manager : ""}</p>
             <p className="text-xs mt-1" style={{ color: "var(--text-600)" }}>
               Control gerencial · Inicio: <strong>{fdate(CP_projectDates(project).start)}</strong> · Terminado: <strong>{CP_projectDates(project).end ? fdate(CP_projectDates(project).end) : "en ejecución"}</strong>
-              {!project.ctrlStart && <span style={{ color: COLORS.amberDark }}> (inicio tomado del proyecto; edítalo con el lápiz)</span>}
+              {project.otId ? <span style={{ color: COLORS.green }}> · Ligado a la Orden de trabajo N.º {project.otNumber || ""} y al Calendario</span> : !project.ctrlStart && <span style={{ color: COLORS.amberDark }}> (inicio tomado del proyecto; edítalo con el lápiz)</span>}
             </p>
             {project.notes && <p className="text-xs mt-1 max-w-xl" style={{ color: "var(--text-400)" }}>{project.notes}</p>}
             <div className="mt-2"><RagDot level={rag.level} /></div>
@@ -1313,7 +1274,7 @@ function CP_ReportingSection({ project, rag, milestones, projects }) {
 
 /* ---------------------------------- app principal ---------------------------------- */
 
-function CP_Module({ projects, updateProject, createProject, deleteProject, focusId }) {
+function CP_Module({ projects, updateProject, createProject, deleteProject, focusId, onNewProject }) {
   const [selectedId, setSelectedId] = useState(focusId || (projects[0] ? projects[0].id : null));
   const [pYear, setPYear] = useState("todos");
   const [pEstado, setPEstado] = useState("todos");
@@ -1390,10 +1351,10 @@ function CP_Module({ projects, updateProject, createProject, deleteProject, focu
       </div>
       <ModulePicker items={projects.filter((p) => p.id === selectedId || ((pYear === "todos" || (CP_projectDates(p).start || "").slice(0, 4) === pYear) && (pEstado === "todos" || (pEstado === "terminados") === (CP_projectState(p) === "culminado")))).map((p) => ({ id: p.id, name: p.name, sub: p.client, done: CP_isProjectComplete(p) || !!p.ctrlEnd }))} selectedId={selectedId}
         onSelect={(id) => { setSelectedId(id); setView("detail"); setTab("resumen"); setExpandedPhaseId(null); }}
-        onNew={() => setView("new")} onDelete={handleDelete} newLabel="Nuevo proyecto" />
+        onNew={() => onNewProject && onNewProject()} onDelete={handleDelete} newLabel="Nuevo proyecto (desde orden de trabajo)" />
 
-      {view === "new" || !project ? (
-        <CP_NewProjectForm onCreate={handleCreate} onCancel={() => project && setView("detail")} />
+      {!project ? (
+        <CP_EmptyState onNew={() => onNewProject && onNewProject()} />
       ) : (
         <div className="space-y-6">
           <CP_ProjectHeader project={project} rag={rag} tab={tab} setTab={setTab} onUpdateMeta={(patch) => updateProject(project.id, patch)} />
@@ -1819,7 +1780,7 @@ function CAL_WeeklyLoadChart({ weeks }) {
 
 /* ---------------------------------- tabla editable ---------------------------------- */
 
-function CAL_ProjectsTable({ items, onUpdate, onDelete, onAdd, cpProjects }) {
+function CAL_ProjectsTable({ items, onUpdate, onDelete, onAdd, cpProjects, onNewOT }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", client: "", resource: "", startDate: todayISO(), durationDays: 10 });
   const [expandedId, setExpandedId] = useState(null);
@@ -1857,6 +1818,7 @@ function CAL_ProjectsTable({ items, onUpdate, onDelete, onAdd, cpProjects }) {
                     <div className="flex items-center gap-2">
                       <span style={{ width: 8, height: 8, borderRadius: 999, background: done ? COLORS.green : it.color, flexShrink: 0 }} />
                       {done && <CheckCircle2 size={13} color={COLORS.green} />}
+                      {it.otNumber ? <span className="risk-pill" style={{ background: "var(--amber-soft)", color: COLORS.amberDark, flexShrink: 0 }}>OT {it.otNumber}</span> : null}
                       <input className="field" style={{ minWidth: 140, color: done ? COLORS.green : undefined, fontWeight: done ? 600 : undefined }} value={it.name} onChange={(e) => onUpdate(it.id, { name: e.target.value })} />
                     </div>
                   </td>
@@ -1907,7 +1869,7 @@ function CAL_ProjectsTable({ items, onUpdate, onDelete, onAdd, cpProjects }) {
           </div>
         </form>
       ) : (
-        <button onClick={() => setShowForm(true)} className="btn-ghost mt-3 text-xs"><Plus size={13} className="inline -mt-0.5 mr-1" />Agregar proyecto</button>
+        <button onClick={() => (onNewOT ? onNewOT() : setShowForm(true))} className="btn-ghost mt-3 text-xs"><Plus size={13} className="inline -mt-0.5 mr-1" />Nueva orden de trabajo (crea el proyecto)</button>
       )}
     </div>
   );
@@ -1947,13 +1909,71 @@ function CAL_KpiRow({ items, crossings, weeks }) {
 
 /* ---------------------------------- pestañas ---------------------------------- */
 
-function CAL_CalendarioTab({ items, crossings, weeks, onUpdate, onDelete, onAdd, cpProjects }) {
+function CAL_CalendarioTab({ items, onUpdate, onDelete, onAdd, cpProjects, onNewOT }) {
   const [view, setView] = useState("gantt");
   const [cursor, setCursor] = useState(new Date());
+  const [fClient, setFClient] = useState("todos");
+  const [fRes, setFRes] = useState("todos");
+  const [fEstado, setFEstado] = useState("todos");
+  const [fYear, setFYear] = useState("todos");
+  const [fMonth, setFMonth] = useState("todos");
+  const [fOT, setFOT] = useState("todos");
+  const [q, setQ] = useState("");
+  const [orderBy, setOrderBy] = useState("start");
   const VIEWS = [["gantt", "Gantt"], ["mes", "Mes"], ["semana", "Semana"], ["año", "Año"]];
+
+  const clients = useMemo(() => [...new Set(items.map((i) => i.client).filter(Boolean))].sort(), [items]);
+  const resources = useMemo(() => [...new Set(items.map((i) => i.resource).filter(Boolean))].sort(), [items]);
+  const years = useMemo(() => {
+    const ys = new Set([String(new Date().getFullYear())]);
+    items.forEach((i) => { if (i.startDate) ys.add(i.startDate.slice(0, 4)); ys.add(toISO(CAL_endDateOf(i)).slice(0, 4)); });
+    return [...ys].sort().reverse();
+  }, [items]);
+  const today = todayISO();
+  const fItems = useMemo(() => {
+    const list = items.filter((it) => {
+      const end = toISO(CAL_endDateOf(it));
+      if (fClient !== "todos" && it.client !== fClient) return false;
+      if (fRes !== "todos" && (it.resource || "") !== fRes) return false;
+      if (fEstado === "atrasado" ? !(it.status !== "completado" && end < today) : fEstado !== "todos" && it.status !== fEstado) return false;
+      if (fOT === "con" && !it.otId) return false;
+      if (fOT === "sin" && it.otId) return false;
+      if (q.trim() && !(it.name + " " + (it.client || "") + " " + (it.resource || "")).toLowerCase().includes(q.trim().toLowerCase())) return false;
+      if (fYear !== "todos" || fMonth !== "todos") {
+        const y = fYear === "todos" ? new Date().getFullYear() : Number(fYear);
+        const from = fMonth === "todos" ? y + "-01-01" : y + "-" + String(fMonth).padStart(2, "0") + "-01";
+        const to = fMonth === "todos" ? y + "-12-31" : y + "-" + String(fMonth).padStart(2, "0") + "-" + String(new Date(y, Number(fMonth), 0).getDate()).padStart(2, "0");
+        if (!(it.startDate <= to && end >= from)) return false;
+      }
+      return true;
+    });
+    const keyOf = { start: (i) => i.startDate, end: (i) => toISO(CAL_endDateOf(i)), name: (i) => (i.name || "").toLowerCase(), client: (i) => (i.client || "").toLowerCase() }[orderBy];
+    return [...list].sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0));
+  }, [items, fClient, fRes, fEstado, fYear, fMonth, fOT, q, orderBy]);
+  const crossings = useMemo(() => CAL_detectCrossings(fItems), [fItems]);
+  const weeks = useMemo(() => CAL_computeWeeklyLoad(fItems), [fItems]);
+  const hayFiltros = fClient !== "todos" || fRes !== "todos" || fEstado !== "todos" || fYear !== "todos" || fMonth !== "todos" || fOT !== "todos" || q;
+  const reset = () => { setFClient("todos"); setFRes("todos"); setFEstado("todos"); setFYear("todos"); setFMonth("todos"); setFOT("todos"); setQ(""); };
+
   return (
     <div className="space-y-6">
-      <CAL_KpiRow items={items} crossings={crossings} weeks={weeks} />
+      <Panel>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div><label className="field-label">Año</label><select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+          <div><label className="field-label">Mes</label><select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+          <div><label className="field-label">Estado</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option><option value="planificado">Planificado</option><option value="en_curso">En curso</option><option value="completado">Completado</option><option value="atrasado">Atrasados</option></select></div>
+          <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+          <div><label className="field-label">Recurso / equipo</label><select className="field" value={fRes} onChange={(e) => setFRes(e.target.value)}><option value="todos">Todos</option>{resources.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+          <div><label className="field-label">Orden de trabajo</label><select className="field" value={fOT} onChange={(e) => setFOT(e.target.value)}><option value="todos">Todos</option><option value="con">Con orden</option><option value="sin">Sin orden</option></select></div>
+          <div><label className="field-label">Ordenar por</label><select className="field" value={orderBy} onChange={(e) => setOrderBy(e.target.value)}><option value="start">Inicio</option><option value="end">Fin</option><option value="name">Proyecto</option><option value="client">Cliente</option></select></div>
+          <div><label className="field-label">Buscar</label><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Proyecto, cliente…" /></div>
+        </div>
+        <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+          <p className="text-xs" style={{ color: "var(--text-600)" }}>{fItems.length} de {items.length} proyecto(s) en el filtro</p>
+          {hayFiltros && <button onClick={reset} className="btn-ghost py-1 px-3 text-xs">Restablecer filtros</button>}
+        </div>
+      </Panel>
+      <CAL_KpiRow items={fItems} crossings={crossings} weeks={weeks} />
       <Panel>
         <PanelHeader title="Cronograma general" right={
           <div className="flex gap-1 p-1 rounded" style={{ background: "var(--steel-100)" }}>
@@ -1962,10 +1982,10 @@ function CAL_CalendarioTab({ items, crossings, weeks, onUpdate, onDelete, onAdd,
             ))}
           </div>
         } />
-        {view === "gantt" && <CAL_GanttChart items={items} crossings={crossings} />}
-        {view === "mes" && <CAL_MonthView items={items} cursor={cursor} setCursor={setCursor} />}
-        {view === "semana" && <CAL_WeekView items={items} cursor={cursor} setCursor={setCursor} />}
-        {view === "año" && <CAL_YearView items={items} cursor={cursor} setCursor={setCursor} />}
+        {view === "gantt" && <CAL_GanttChart items={fItems} crossings={crossings} />}
+        {view === "mes" && <CAL_MonthView items={fItems} cursor={cursor} setCursor={setCursor} />}
+        {view === "semana" && <CAL_WeekView items={fItems} cursor={cursor} setCursor={setCursor} />}
+        {view === "año" && <CAL_YearView items={fItems} cursor={cursor} setCursor={setCursor} />}
         {view === "gantt" && <p className="text-[11px] mt-2" style={{ color: "var(--text-400)" }}>La línea vertical marca hoy. Las franjas rojas indican fechas con cruce de recursos.</p>}
       </Panel>
       <Panel>
@@ -1974,7 +1994,8 @@ function CAL_CalendarioTab({ items, crossings, weeks, onUpdate, onDelete, onAdd,
       </Panel>
       <Panel>
         <PanelHeader title="Proyectos y duración" />
-        <CAL_ProjectsTable items={items} onUpdate={onUpdate} onDelete={onDelete} onAdd={onAdd} cpProjects={cpProjects} />
+        <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Los proyectos con etiqueta «OT» están ligados a su orden de trabajo y a Control de proyectos: si cambias aquí el inicio o la duración, se actualizan allá.</p>
+        <CAL_ProjectsTable items={fItems} onUpdate={onUpdate} onDelete={onDelete} onAdd={onAdd} cpProjects={cpProjects} onNewOT={onNewOT} />
       </Panel>
     </div>
   );
@@ -2075,7 +2096,7 @@ function CAL_ReportingSection({ items, crossings, risks, weeks }) {
   );
 }
 
-function CAL_Module({ items, setItems, risks, setRisks, cpProjects }) {
+function CAL_Module({ items, setItems, risks, setRisks, cpProjects, onNewOT }) {
   const [tab, setTab] = useState("calendario");
 
   const addItem = (form) => {
@@ -2099,7 +2120,7 @@ function CAL_Module({ items, setItems, risks, setRisks, cpProjects }) {
     <div className="space-y-6">
       <SubTabs tabs={[["calendario", "Calendario"], ["riesgos", "Riesgos"], ["reportes", "Reportería"]]} active={tab} onChange={setTab} />
       {tab === "calendario" ? (
-        <CAL_CalendarioTab items={items} crossings={crossings} weeks={weeks} onUpdate={updateItem} onDelete={deleteItem} onAdd={addItem} cpProjects={cpProjects} />
+        <CAL_CalendarioTab items={items} crossings={crossings} weeks={weeks} onUpdate={updateItem} onDelete={deleteItem} onAdd={addItem} cpProjects={cpProjects} onNewOT={onNewOT} />
       ) : tab === "riesgos" ? (
         <CAL_RiesgosTab crossings={crossings} risks={risks} onAdd={addRisk} onDelete={deleteRisk} onToggleStatus={toggleRiskStatus} />
       ) : (
@@ -3613,6 +3634,17 @@ function OT_workdays(a, b) {
   return n;
 }
 
+function OT_addWorkdays(startISO, n) {
+  let d = new Date(startISO + "T00:00:00"); let count = 0;
+  const target = Math.max(1, Math.round(n));
+  while (true) {
+    const w = d.getDay();
+    if (w !== 0 && w !== 6) { count++; if (count >= target) break; }
+    d = new Date(d.getTime() + 86400000);
+  }
+  return toISO(d);
+}
+
 function OT_calc(o) {
   const refLab = o.laborIsReference !== false;
   const budget = r2(num(o.budgetMaterials) + num(o.budgetTransport) + (refLab ? 0 : num(o.budgetLabor)));
@@ -3646,10 +3678,10 @@ function OT_buildRows(orders) {
 function OT_blank(orders) {
   const max = orders.reduce((m, o) => Math.max(m, num(o.number)), 0);
   return {
-    id: uid(), number: max + 1, issueDate: todayISO(), name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "",
+    id: uid(), number: max + 1, issueDate: todayISO(), projectId: "", calItemId: "", resource: "", name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "",
     budgetMaterials: "", budgetTransport: "", budgetLabor: "", laborIsReference: true,
     actualMaterials: "", actualTransport: "", actualLabor: "",
-    plannedStart: "", plannedEnd: "", authorizedDays: "", realStart: "", realEnd: "", staff: "", notes: "",
+    plannedStart: todayISO(), plannedEnd: "", authorizedDays: "", realStart: "", realEnd: "", staff: "", notes: "",
     authorizedBy: "", receivedBy: "", receivedDate: "", status: "emitida", progress: 0,
   };
 }
@@ -3722,6 +3754,10 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const setV = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
   const c = OT_calc(f);
+  const [err, setErr] = useState("");
+  const setStart = (e) => { const v = e.target.value; setF((x) => ({ ...x, plannedStart: v, plannedEnd: v && num(x.authorizedDays) > 0 ? OT_addWorkdays(v, num(x.authorizedDays)) : x.plannedEnd })); };
+  const setDays = (v) => setF((x) => ({ ...x, authorizedDays: v, plannedEnd: x.plannedStart && num(v) > 0 ? OT_addWorkdays(x.plannedStart, num(v)) : x.plannedEnd }));
+  const setEnd = (e) => { const v = e.target.value; setF((x) => ({ ...x, plannedEnd: v, authorizedDays: x.plannedStart && v ? String(OT_workdays(x.plannedStart, v)) : x.authorizedDays })); };
   const pickProject = (id) => {
     const p = cpProjects.find((x) => x.id === id);
     setF((x) => p ? { ...x, projectId: id, name: p.name, client: x.client || p.client || "", coordinator: x.coordinator || p.manager || "" } : { ...x, projectId: "" });
@@ -3729,6 +3765,11 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     if (!f.name.trim()) return;
+    if (f.status !== "borrador" && f.status !== "anulada") {
+      if (!f.plannedStart || !f.plannedEnd) { setErr("Indica la fecha de inicio y la duración (días laborables) o la fecha de entrega: de ahí salen el proyecto y el calendario."); return; }
+      if (f.plannedEnd < f.plannedStart) { setErr("La fecha de entrega no puede ser anterior a la de inicio."); return; }
+    }
+    setErr("");
     onSave({ ...f, number: num(f.number), progress: Math.min(100, Math.max(0, num(f.progress))) });
   };
   return (
@@ -3755,7 +3796,7 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
       <OT_Section n="1" title="Identificación del proyecto">
         <div className="space-y-4">
           <div>
-            <label className="field-label">Vincular con un proyecto de Control de proyectos (opcional)</label>
+            <label className="field-label">Proyecto en Control de proyectos (déjalo vacío: se crea solo al guardar la orden; elige uno solo si ya existe)</label>
             <select className="field" value={f.projectId || ""} onChange={(e) => pickProject(e.target.value)}>
               <option value="">— Sin vincular (escribir manualmente) —</option>
               {cpProjects.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.client}</option>)}
@@ -3799,13 +3840,15 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
 
       <OT_Section n="3" title="Plazo y programación">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div><label className="field-label">Fecha prevista de inicio</label><input type="date" className="field" value={f.plannedStart} onChange={set("plannedStart")} /></div>
-          <div><label className="field-label">Fecha prevista de entrega</label><input type="date" className="field" value={f.plannedEnd} onChange={set("plannedEnd")} /></div>
-          <div><label className="field-label">Duración autorizada (días laborables)</label><DecimalInput className="field" value={f.authorizedDays} onChange={setV("authorizedDays")} placeholder="0" /></div>
+          <div><label className="field-label">Fecha prevista de inicio</label><input type="date" className="field" value={f.plannedStart} onChange={setStart} /></div>
+          <div><label className="field-label">Duración autorizada (días laborables)</label><DecimalInput className="field" value={f.authorizedDays} onChange={setDays} placeholder="0" /></div>
+          <div><label className="field-label">Fecha prevista de entrega</label><input type="date" className="field" value={f.plannedEnd} onChange={setEnd} /></div>
           <div><label className="field-label">Personal asignado</label><input className="field" value={f.staff} onChange={set("staff")} /></div>
+          <div className="col-span-2"><label className="field-label">Recurso / equipo (para detectar cruces en el Calendario)</label><input className="field" value={f.resource || ""} onChange={set("resource")} placeholder="Ej. Taller de mecanizado" /></div>
           <div><label className="field-label">Inicio real</label><input type="date" className="field" value={f.realStart} onChange={set("realStart")} /></div>
           <div><label className="field-label">Entrega real</label><input type="date" className="field" value={f.realEnd} onChange={set("realEnd")} /></div>
         </div>
+        <p className="text-xs mt-3" style={{ color: "var(--text-600)" }}>Estas fechas son la fuente única: al guardar se crean y actualizan en el Calendario y en Control de proyectos (fases repartidas por días). Si cambias las fechas en el Calendario, se actualizan aquí.</p>
         <div className="mt-4"><label className="field-label">Observaciones / hitos</label><textarea className="field" rows={3} value={f.notes} onChange={set("notes")} /></div>
       </OT_Section>
 
@@ -3817,6 +3860,7 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
           <div><label className="field-label">Fecha de recepción</label><input type="date" className="field" value={f.receivedDate} onChange={set("receivedDate")} /></div>
         </div>
       </OT_Section>
+      {err && <p className="text-sm" style={{ color: COLORS.red }}>{err}</p>}
       <div className="flex gap-2">
         <button type="submit" className="btn-primary">Guardar orden</button>
         <button type="button" onClick={onCancel} className="btn-ghost">Cancelar</button>
@@ -3887,7 +3931,7 @@ function OT_recommendations(rows) {
 }
 
 /* ---- módulo ---- */
-function OT_Module({ orders, setOrders, cpProjects }) {
+function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest, onNewHandled }) {
   const now = new Date();
   const [tab, setTab] = useState("resumen");
   const [editing, setEditing] = useState(null); // objeto en edición
@@ -3954,8 +3998,9 @@ function OT_Module({ orders, setOrders, cpProjects }) {
 
   const startNew = () => { setEditing(OT_blank(orders)); setIsNew(true); setTab("ordenes"); };
   const startEdit = (id) => { const o = orders.find((x) => x.id === id); if (o) { setEditing({ ...OT_blank([]), ...o }); setIsNew(false); setTab("ordenes"); } };
-  const save = (o) => { setOrders((prev) => prev.some((x) => x.id === o.id) ? prev.map((x) => x.id === o.id ? o : x) : [o, ...prev]); setEditing(null); };
-  const remove = (id) => { setOrders((prev) => prev.filter((x) => x.id !== id)); setConfirmId(null); };
+  const save = (o) => { onSaveOrder(o); setEditing(null); };
+  const remove = (id) => { onDeleteOrder(id); setConfirmId(null); };
+  useEffect(() => { if (newRequest) { startNew(); onNewHandled && onNewHandled(); } }, [newRequest]);
 
   const Header = (
     <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -4697,6 +4742,7 @@ function App() {
   const [section, setSection] = useState("resumen");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusProjectId, setFocusProjectId] = useState(null);
+  const [otNewRequest, setOtNewRequest] = useState(false);
 
   const proyectosSync = useDatasetSync("Proyectos", [], (arr) => arr, (state) => state);
   const calSync = useDatasetSync("Calendario", { items: [], risks: [] },
@@ -4748,6 +4794,66 @@ function App() {
       </div>
     );
   }
+
+  const goNewOrder = () => { setOtNewRequest(true); setSection("ordenes"); };
+  const calStatusOf = (st) => (st === "en_ejecucion" ? "en_curso" : st === "entregada" || st === "cerrada" ? "completado" : "planificado");
+
+  const saveOrder = (o) => {
+    const order = { ...o };
+    const live = order.status !== "borrador" && order.status !== "anulada" && order.plannedStart && order.plannedEnd;
+    if (live) {
+      const start = order.plannedStart, end = order.plannedEnd;
+      const budget = OT_calc(order).budget;
+      const terminal = order.status === "entregada" || order.status === "cerrada";
+      const projectId = order.projectId || uid();
+      const calId = order.calItemId || uid();
+      order.projectId = projectId; order.calItemId = calId;
+      proyectosSync.setState((prev) => {
+        const base = prev.find((p) => p.id === projectId);
+        if (!base) {
+          const np = { id: projectId, name: order.name, client: order.client, type: "Orden de trabajo", manager: order.coordinator || "", notes: "", startDate: start, ctrlStart: start, ctrlEnd: terminal ? (order.realEnd || todayISO()) : "", otId: order.id, otNumber: order.number,
+            phases: CP_reschedulePhases(CP_buildPhases(start, 20, budget), start, end, budget), risks: [], milestones: [] };
+          return [np, ...prev];
+        }
+        return prev.map((p) => p.id !== projectId ? p : { ...p, name: order.name, client: order.client || p.client, manager: order.coordinator || p.manager, startDate: start, ctrlStart: start,
+          ctrlEnd: terminal ? (order.realEnd || p.ctrlEnd || todayISO()) : "", otId: order.id, otNumber: order.number, phases: CP_reschedulePhases(p.phases, start, end, budget) });
+      });
+      calSync.setState((prev) => {
+        const fields = { name: order.name, client: order.client || "", resource: order.resource || "", startDate: start, durationDays: Math.max(1, daysBetween(start, end) + 1), status: calStatusOf(order.status), otId: order.id, otNumber: order.number, projectId };
+        const exists = prev.items.some((i) => i.id === calId);
+        return { ...prev, items: exists ? prev.items.map((i) => (i.id === calId ? { ...i, ...fields } : i)) : [...prev.items, { id: calId, notes: "", color: CAL_PALETTE[prev.items.length % CAL_PALETTE.length], ...fields }] };
+      });
+    } else if (order.status === "anulada" && order.calItemId) {
+      const cid = order.calItemId;
+      calSync.setState((prev) => ({ ...prev, items: prev.items.filter((i) => i.id !== cid) }));
+      order.calItemId = "";
+    }
+    otSync.setState((prev) => (prev.some((x) => x.id === order.id) ? prev.map((x) => (x.id === order.id ? order : x)) : [order, ...prev]));
+  };
+  const deleteOrder = (id) => {
+    otSync.setState((prev) => prev.filter((x) => x.id !== id));
+    calSync.setState((prev) => ({ ...prev, items: prev.items.map((i) => (i.otId === id ? { ...i, otId: "", otNumber: "" } : i)) }));
+    proyectosSync.setState((prev) => prev.map((p) => (p.otId === id ? { ...p, otId: "", otNumber: "" } : p)));
+  };
+  // Cambios hechos en el Calendario -> se reflejan en la orden de trabajo y en el proyecto
+  const setCalItemsLinked = (updater) => {
+    const prev = calSync.state.items;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    next.forEach((it) => {
+      if (!it.otId) return;
+      const old = prev.find((x) => x.id === it.id);
+      if (!old) return;
+      if (old.startDate === it.startDate && old.durationDays === it.durationDays && (old.resource || "") === (it.resource || "")) return;
+      const start = it.startDate, end = toISO(CAL_endDateOf(it));
+      otSync.setState((p) => p.map((o) => (o.id === it.otId ? { ...o, plannedStart: start, plannedEnd: end, authorizedDays: String(OT_workdays(start, end)), resource: it.resource || "" } : o)));
+      if (it.projectId) {
+        const ord = otSync.state.find((o) => o.id === it.otId);
+        const budget = ord ? OT_calc(ord).budget : 0;
+        proyectosSync.setState((p) => p.map((pr) => (pr.id === it.projectId ? { ...pr, startDate: start, ctrlStart: start, phases: CP_reschedulePhases(pr.phases, start, end, budget) } : pr)));
+      }
+    });
+    setCalItems(next);
+  };
 
   const createProyecto = (form) => {
     const phases = CP_buildPhases(form.startDate, Number(form.weeks) || 1, Number(form.budget) || 0);
@@ -4846,15 +4952,15 @@ function App() {
             {section === "resumen" ? (
               <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} otOrders={otSync.state} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
             ) : section === "proyectos" ? (
-              <CP_Module focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
+              <CP_Module onNewProject={goNewOrder} focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
             ) : section === "calendario" ? (
-              <CAL_Module items={calSync.state.items} setItems={setCalItems} risks={calSync.state.risks} setRisks={setCalRisks} cpProjects={proyectosSync.state} />
+              <CAL_Module onNewOT={goNewOrder} items={calSync.state.items} setItems={setCalItemsLinked} risks={calSync.state.risks} setRisks={setCalRisks} cpProjects={proyectosSync.state} />
             ) : section === "materiales" ? (
               <MAT_Module projects={matSync.state.projects} updateProject={updateMatProject} createProject={createMatProject} deleteProject={deleteMatProject} visits={matSync.state.visits} setVisits={setMatVisits} cpProjects={proyectosSync.state} />
             ) : section === "actas" ? (
               <ACT_Module docs={actSync.state.docs} setDocs={setActDocs} cpProjects={proyectosSync.state} />
             ) : section === "ordenes" ? (
-              <OT_Module orders={otSync.state} setOrders={setOtOrders} cpProjects={proyectosSync.state} />
+              <OT_Module orders={otSync.state} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} cpProjects={proyectosSync.state} />
             ) : (
               <CAJA_Module funds={cajaSync.state.funds} setFunds={setCajaFunds} expenses={cajaSync.state.expenses} setExpenses={setCajaExpenses} cpProjects={proyectosSync.state} />
             )}
