@@ -237,7 +237,19 @@ const toISO = (date) => date.toISOString().slice(0, 10);
 const todayISO = () => toISO(new Date());
 
 function money(n) {
-  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+}
+function DecimalInput({ value, onChange, className, placeholder, style }) {
+  const [text, setText] = useState(value === undefined || value === null ? "" : String(value));
+  useEffect(() => {
+    const cur = parseFloat(String(text).replace(",", "."));
+    const val = parseFloat(value);
+    if (cur !== val && !(text === "" && (value === "" || value === 0 || value === undefined || value === null))) setText(value === undefined || value === null ? "" : String(value));
+  }, [value]);
+  return (
+    <input type="text" inputMode="decimal" className={className} style={style} placeholder={placeholder} value={text}
+      onChange={(e) => { const t = e.target.value; if (!/^\d*[.,]?\d*$/.test(t)) return; setText(t); onChange(t === "" ? "" : t.replace(",", ".")); }} />
+  );
 }
 function fdate(iso) {
   if (!iso) return "—";
@@ -484,7 +496,7 @@ function CP_buildPhases(startDateStr, totalWeeks, totalBudget) {
       plannedEnd: toISO(plannedEnd),
       actualStart: i === 0 ? todayISO() : "",
       actualEnd: "",
-      budgetPlanned: Math.round(totalBudget * (tpl.weight / 100)),
+      budgetPlanned: Math.round(totalBudget * (tpl.weight / 100) * 100) / 100,
       budgetActual: 0,
       responsible: "",
       deliverables: tpl.deliverables.map((d) => ({ id: uid(), name: d, done: false })),
@@ -702,7 +714,7 @@ function CP_NewProjectForm({ onCreate, onCancel }) {
           </div>
           <div>
             <label className="field-label">Presupuesto total (USD)</label>
-            <input type="number" min="0" step="100" className="field" value={form.budget} onChange={set("budget")} />
+            <DecimalInput className="field" value={form.budget} onChange={(v) => setForm((f) => ({ ...f, budget: v }))} placeholder="0.00" />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 p-3 rounded" style={{ background: "var(--steel-100)" }}>
@@ -892,11 +904,11 @@ function CP_PhaseFlow({ phases, expandedId, setExpandedId, onUpdatePhase, onTogg
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="field-label">Presupuesto planificado</label>
-                <input type="number" className="field" value={p.budgetPlanned} onChange={(e) => onUpdatePhase(p.id, { budgetPlanned: Number(e.target.value) })} />
+                <DecimalInput className="field" value={p.budgetPlanned} onChange={(v) => onUpdatePhase(p.id, { budgetPlanned: parseFloat(v) || 0 })} placeholder="0.00" />
               </div>
               <div>
                 <label className="field-label">Presupuesto ejecutado</label>
-                <input type="number" className="field" value={p.budgetActual} onChange={(e) => onUpdatePhase(p.id, { budgetActual: Number(e.target.value) })} />
+                <DecimalInput className="field" value={p.budgetActual} onChange={(v) => onUpdatePhase(p.id, { budgetActual: parseFloat(v) || 0 })} placeholder="0.00" />
               </div>
               <div>
                 <label className="field-label">Responsable de la fase</label>
@@ -3322,7 +3334,7 @@ function CAJA_FundsTab({ funds, onAdd, onDelete }) {
         <PanelHeader title="Registrar entrega o reposición de fondo" />
         <form onSubmit={submit} className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div><label className="field-label">Fecha</label><input type="date" className="field" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
-          <div><label className="field-label">Monto (USD)</label><input type="number" min="0" step="0.01" className="field" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+          <div><label className="field-label">Monto (USD)</label><input type="number" min="0" step="any" className="field" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
           <div>
             <label className="field-label">Método</label>
             <select className="field" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>
@@ -3397,7 +3409,7 @@ function CAJA_ExpensesTab({ expenses, cpProjects, onAdd, onDelete }) {
             <datalist id="proyectos-caja">{projectNames.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
           <div className="md:col-span-2"><label className="field-label">Descripción</label><input className="field" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="¿En qué se gastó?" /></div>
-          <div><label className="field-label">Monto (USD)</label><input type="number" min="0" step="0.01" className="field" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+          <div><label className="field-label">Monto (USD)</label><input type="number" min="0" step="any" className="field" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
           <div><label className="field-label">Responsable</label><input className="field" value={form.responsible} onChange={(e) => setForm({ ...form, responsible: e.target.value })} /></div>
           <div>
             <label className="field-label">Método de pago</label>
@@ -3575,6 +3587,542 @@ function CAJA_Module({ funds, setFunds, expenses, setExpenses, cpProjects }) {
   );
 }
 
+/* ===== MODULO: ORDENES DE TRABAJO ===== */
+
+const OT_ESTADOS = [
+  { key: "borrador", label: "Borrador", color: "#8797A6" },
+  { key: "emitida", label: "Emitida", color: COLORS.steel },
+  { key: "en_ejecucion", label: "En ejecución", color: COLORS.amber },
+  { key: "entregada", label: "Entregada", color: COLORS.green },
+  { key: "cerrada", label: "Cerrada", color: COLORS.ink },
+  { key: "anulada", label: "Anulada", color: COLORS.red },
+];
+const OT_TERMINAL = ["entregada", "cerrada", "anulada"];
+const OT_estadoMeta = (k) => OT_ESTADOS.find((e) => e.key === k) || OT_ESTADOS[0];
+const num = (v) => { const n = parseFloat(String(v === undefined || v === null ? "" : v).replace(",", ".")); return isNaN(n) ? 0 : n; };
+const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+function OT_workdays(a, b) {
+  if (!a || !b) return null;
+  let d = new Date(a + "T00:00:00"); const end = new Date(b + "T00:00:00");
+  if (end < d) return 0;
+  let n = 0;
+  while (d <= end) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; d = new Date(d.getTime() + 86400000); }
+  return n;
+}
+
+function OT_calc(o) {
+  const refLab = o.laborIsReference !== false;
+  const budget = r2(num(o.budgetMaterials) + num(o.budgetTransport) + (refLab ? 0 : num(o.budgetLabor)));
+  const actual = r2(num(o.actualMaterials) + num(o.actualTransport) + (refLab ? 0 : num(o.actualLabor)));
+  const variance = r2(actual - budget);
+  const execPct = budget > 0 ? Math.round((actual / budget) * 100) : 0;
+  const status = o.status || "borrador";
+  const terminal = OT_TERMINAL.includes(status);
+  const today = todayISO();
+  const late = !terminal && !!o.plannedEnd && o.plannedEnd < today;
+  const over = budget > 0 && actual > budget + 0.004;
+  const endReal = o.realEnd || "";
+  const workdays = OT_workdays(o.realStart || o.plannedStart, endReal || (terminal ? "" : today));
+  let onTime = null;
+  if ((status === "entregada" || status === "cerrada") && endReal) {
+    if (o.plannedEnd) onTime = endReal <= o.plannedEnd;
+    else if (num(o.authorizedDays) > 0 && o.realStart) onTime = OT_workdays(o.realStart, endReal) <= num(o.authorizedDays);
+  }
+  const level = over || (late && daysBetween(o.plannedEnd, today) > 7) ? "rojo" : late || (budget > 0 && actual > budget * 0.9) ? "amarillo" : "verde";
+  return { budget, actual, variance, execPct, status, terminal, late, over, onTime, level, workdays, labor: num(o.budgetLabor) };
+}
+
+function OT_buildRows(orders) {
+  return orders.map((o) => {
+    const c = OT_calc(o);
+    return { ...c, id: o.id, number: num(o.number), name: o.name || "Sin nombre", client: o.client || "Sin cliente", coordinator: o.coordinator || "Sin responsable", place: o.place || "",
+      issue: o.issueDate || "", start: o.plannedStart || "", end: o.plannedEnd || "", realEnd: o.realEnd || "", progress: num(o.progress), raw: o };
+  });
+}
+
+function OT_blank(orders) {
+  const max = orders.reduce((m, o) => Math.max(m, num(o.number)), 0);
+  return {
+    id: uid(), number: max + 1, issueDate: todayISO(), name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "",
+    budgetMaterials: "", budgetTransport: "", budgetLabor: "", laborIsReference: true,
+    actualMaterials: "", actualTransport: "", actualLabor: "",
+    plannedStart: "", plannedEnd: "", authorizedDays: "", realStart: "", realEnd: "", staff: "", notes: "",
+    authorizedBy: "", receivedBy: "", receivedDate: "", status: "emitida", progress: 0,
+  };
+}
+
+/* ---- gráficos reutilizables ---- */
+function OT_GroupedBars({ data, colors, names, fmt, selected, onPick, height }) {
+  const W = 720, H = height || 220, L = 44, R = 10, T = 14, B = 28;
+  const max = Math.max(1, ...data.map((d) => Math.max(d.a, d.b)));
+  const cw = (W - L - R) / data.length;
+  const bw = Math.min(16, cw / 3);
+  const yOf = (v) => T + (H - T - B) * (1 - v / max);
+  const ticks = [0, 0.5, 1].map((f) => max * f);
+  const f = fmt || ((v) => String(Math.round(v)));
+  return (
+    <div>
+      <div className="flex items-center gap-4 flex-wrap text-xs mb-2" style={{ color: "var(--text-600)" }}>
+        {names.map((n, i) => <span key={i} className="flex items-center gap-1"><span style={{ width: 10, height: 10, background: colors[i], borderRadius: 2 }} />{n}</span>)}
+      </div>
+      <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+        {ticks.map((t, i) => (<g key={i}><line x1={L} x2={W - R} y1={yOf(t)} y2={yOf(t)} stroke="var(--steel-100)" /><text x={L - 5} y={yOf(t) + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{f(t)}</text></g>))}
+        {data.map((d, i) => {
+          const cx = L + cw * i + cw / 2; const sel = selected === d.m;
+          return (
+            <g key={i} style={{ cursor: onPick ? "pointer" : "default" }} onClick={() => onPick && onPick(sel ? "todos" : d.m)}>
+              <rect x={L + cw * i} y={T} width={cw} height={H - T - B} fill={sel ? "var(--amber-soft)" : "transparent"} opacity={sel ? 0.7 : 1} />
+              <rect x={cx - bw - 1} y={yOf(d.a)} width={bw} height={Math.max(0, H - B - yOf(d.a))} fill={colors[0]} rx="2" />
+              <rect x={cx + 1} y={yOf(d.b)} width={bw} height={Math.max(0, H - B - yOf(d.b))} fill={colors[1]} rx="2" />
+              <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fill={sel ? COLORS.ink : "var(--text-600)"} fontWeight={sel ? 700 : 400}>{d.label}</text>
+              <title>{d.label + ": " + names[0] + " " + f(d.a) + " · " + names[1] + " " + f(d.b)}</title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function OT_HBars({ items, fmt, color, active, onPick, max }) {
+  const mx = Math.max(1, ...items.map((i) => i.value));
+  if (!items.length) return <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin datos con estos filtros.</p>;
+  return (
+    <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+      {items.slice(0, max || 8).map((it) => (
+        <div key={it.label} style={{ cursor: onPick ? "pointer" : "default" }} onClick={() => onPick && onPick(active === it.label ? "todos" : it.label)}>
+          <div className="flex items-center justify-between text-xs mb-0.5 gap-2">
+            <span className="truncate" style={{ color: "var(--text-900)", fontWeight: active === it.label ? 700 : 500 }}>{it.label}</span>
+            <span style={{ color: "var(--text-400)" }}>{fmt ? fmt(it.value) : it.value}{it.sub ? " · " + it.sub : ""}</span>
+          </div>
+          <div style={{ height: 8, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: (it.value / mx) * 100 + "%", background: it.color || color || COLORS.amber }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---- formulario (réplica del documento PDF) ---- */
+function OT_Section({ n, title, children }) {
+  return (
+    <div className="panel p-5">
+      <h3 className="text-sm font-semibold mb-4" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>{n}. {title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
+  const [f, setF] = useState(initial);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const setV = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
+  const c = OT_calc(f);
+  const pickProject = (id) => {
+    const p = cpProjects.find((x) => x.id === id);
+    setF((x) => p ? { ...x, projectId: id, name: p.name, client: x.client || p.client || "", coordinator: x.coordinator || p.manager || "" } : { ...x, projectId: "" });
+  };
+  const submit = (e) => {
+    e.preventDefault();
+    if (!f.name.trim()) return;
+    onSave({ ...f, number: num(f.number), progress: Math.min(100, Math.max(0, num(f.progress))) });
+  };
+  return (
+    <form onSubmit={submit} className="space-y-5 max-w-4xl">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>{isNew ? "Nueva orden de trabajo" : "Orden de trabajo N.º " + f.number}</h2>
+          <p className="text-xs" style={{ color: "var(--text-600)" }}>Orden interna de trabajo · Coordinación de operaciones</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="submit" className="btn-primary">Guardar orden</button>
+          <button type="button" onClick={onCancel} className="btn-ghost">Cancelar</button>
+        </div>
+      </div>
+
+      <div className="panel p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div><label className="field-label">N.º de orden</label><input type="number" min="1" className="field" value={f.number} onChange={set("number")} /></div>
+        <div><label className="field-label">Fecha de emisión</label><input type="date" className="field" value={f.issueDate} onChange={set("issueDate")} /></div>
+        <div><label className="field-label">Estado</label>
+          <select className="field" value={f.status} onChange={set("status")}>{OT_ESTADOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+        <div><label className="field-label">Avance (%)</label><DecimalInput className="field" value={f.progress} onChange={setV("progress")} placeholder="0" /></div>
+      </div>
+
+      <OT_Section n="1" title="Identificación del proyecto">
+        <div className="space-y-4">
+          <div>
+            <label className="field-label">Vincular con un proyecto de Control de proyectos (opcional)</label>
+            <select className="field" value={f.projectId || ""} onChange={(e) => pickProject(e.target.value)}>
+              <option value="">— Sin vincular (escribir manualmente) —</option>
+              {cpProjects.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.client}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="field-label">Nombre del proyecto</label><input required className="field" value={f.name} onChange={set("name")} placeholder="Ej. Braket L" /></div>
+            <div><label className="field-label">Cliente / empresa</label><input className="field" value={f.client} onChange={set("client")} placeholder="Ej. Coreptec (Ing. Armando Navarro)" /></div>
+            <div><label className="field-label">Lugar de ejecución</label><input className="field" value={f.place} onChange={set("place")} placeholder="Ej. Quito" /></div>
+            <div><label className="field-label">Responsable / coordinador</label><input className="field" value={f.coordinator} onChange={set("coordinator")} /></div>
+          </div>
+          <div><label className="field-label">Descripción y alcance del trabajo</label><textarea className="field" rows={6} value={f.description} onChange={set("description")} placeholder="Alcance, materiales, procesos, notas…" /></div>
+        </div>
+      </OT_Section>
+
+      <OT_Section n="2" title="Presupuesto autorizado (USD)">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label className="field-label">Materiales</label><DecimalInput className="field" value={f.budgetMaterials} onChange={setV("budgetMaterials")} placeholder="0.00" /></div>
+          <div><label className="field-label">Movilización / transporte</label><DecimalInput className="field" value={f.budgetTransport} onChange={setV("budgetTransport")} placeholder="0.00" /></div>
+          <div><label className="field-label">Mano de obra{f.laborIsReference !== false ? " (referencia)" : ""}</label><DecimalInput className="field" value={f.budgetLabor} onChange={setV("budgetLabor")} placeholder="0.00" /></div>
+        </div>
+        <label className="flex items-center gap-2 text-xs mt-3" style={{ color: "var(--text-600)" }}>
+          <input type="checkbox" checked={f.laborIsReference !== false} onChange={(e) => setF((x) => ({ ...x, laborIsReference: e.target.checked }))} />
+          La mano de obra es solo referencia (no se suma al total presupuestado)
+        </label>
+        <div className="mt-4 p-3 rounded flex items-center justify-between" style={{ background: "var(--steel-100)" }}>
+          <span className="text-sm font-semibold" style={{ color: "var(--text-900)" }}>TOTAL PRESUPUESTADO</span>
+          <span className="text-lg font-semibold" style={{ fontFamily: "var(--font-display)", color: COLORS.ink }}>{money(c.budget)}</span>
+        </div>
+        <p className="text-xs font-semibold mt-5 mb-2" style={{ color: "var(--text-600)" }}>Gasto real ejecutado (control)</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label className="field-label">Materiales (real)</label><DecimalInput className="field" value={f.actualMaterials} onChange={setV("actualMaterials")} placeholder="0.00" /></div>
+          <div><label className="field-label">Movilización (real)</label><DecimalInput className="field" value={f.actualTransport} onChange={setV("actualTransport")} placeholder="0.00" /></div>
+          <div><label className="field-label">Mano de obra (real)</label><DecimalInput className="field" value={f.actualLabor} onChange={setV("actualLabor")} placeholder="0.00" /></div>
+        </div>
+        <div className="mt-3 flex items-center justify-between flex-wrap gap-2 text-sm">
+          <span style={{ color: "var(--text-600)" }}>Ejecutado: <strong>{money(c.actual)}</strong> ({c.execPct}%)</span>
+          <span style={{ color: c.variance > 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{c.variance > 0 ? "Sobrecosto: " : "Ahorro: "}{money(Math.abs(c.variance))}</span>
+        </div>
+      </OT_Section>
+
+      <OT_Section n="3" title="Plazo y programación">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div><label className="field-label">Fecha prevista de inicio</label><input type="date" className="field" value={f.plannedStart} onChange={set("plannedStart")} /></div>
+          <div><label className="field-label">Fecha prevista de entrega</label><input type="date" className="field" value={f.plannedEnd} onChange={set("plannedEnd")} /></div>
+          <div><label className="field-label">Duración autorizada (días laborables)</label><DecimalInput className="field" value={f.authorizedDays} onChange={setV("authorizedDays")} placeholder="0" /></div>
+          <div><label className="field-label">Personal asignado</label><input className="field" value={f.staff} onChange={set("staff")} /></div>
+          <div><label className="field-label">Inicio real</label><input type="date" className="field" value={f.realStart} onChange={set("realStart")} /></div>
+          <div><label className="field-label">Entrega real</label><input type="date" className="field" value={f.realEnd} onChange={set("realEnd")} /></div>
+        </div>
+        <div className="mt-4"><label className="field-label">Observaciones / hitos</label><textarea className="field" rows={3} value={f.notes} onChange={set("notes")} /></div>
+      </OT_Section>
+
+      <OT_Section n="4" title="Control y autorización">
+        <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Cualquier gasto adicional o cambio de plazo debe ser aprobado antes de ejecutarse.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label className="field-label">Elaborado / autorizado por</label><input className="field" value={f.authorizedBy} onChange={set("authorizedBy")} /></div>
+          <div><label className="field-label">Recibido por coordinador</label><input className="field" value={f.receivedBy} onChange={set("receivedBy")} /></div>
+          <div><label className="field-label">Fecha de recepción</label><input type="date" className="field" value={f.receivedDate} onChange={set("receivedDate")} /></div>
+        </div>
+      </OT_Section>
+      <div className="flex gap-2">
+        <button type="submit" className="btn-primary">Guardar orden</button>
+        <button type="button" onClick={onCancel} className="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
+function OT_printOrder(o) {
+  const c = OT_calc(o);
+  const esc = (s) => String(s === undefined || s === null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+  const row = (a, b) => `<tr><th>${a}</th><td>${b}</td></tr>`;
+  const ref = o.laborIsReference !== false;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Orden de trabajo ${esc(o.number)}</title><style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#16202E;margin:32px;font-size:13px}h1{font-size:18px;margin:0;color:#12203A;text-align:center}
+  .sub{text-align:center;color:#52606D;font-size:12px;margin:2px 0 16px}.meta{display:flex;justify-content:space-between;margin-bottom:12px;font-weight:600}
+  h2{font-size:13px;background:#12203A;color:#fff;padding:5px 8px;margin:16px 0 0}table{width:100%;border-collapse:collapse}th,td{border:1px solid #C7D2DC;padding:6px 8px;text-align:left;vertical-align:top}
+  th{background:#F1F4F7;width:32%;font-weight:600}.tot th,.tot td{font-weight:700;background:#FBE8CB}.foot{margin-top:20px;font-size:11px;color:#52606D;text-align:center}
+  </style></head><body>
+  <h1>SOLUCIONES INDUSTRIALES GAM</h1><p class="sub">ORDEN INTERNA DE TRABAJO | COORDINACIÓN DE OPERACIONES</p>
+  <div class="meta"><span>N.º de orden: ${esc(o.number)}</span><span>Fecha de emisión: ${esc(o.issueDate)}</span></div>
+  <h2>1. Identificación del proyecto</h2><table>${row("Nombre del proyecto", esc(o.name))}${row("Cliente / empresa", esc(o.client))}${row("Lugar de ejecución", esc(o.place))}${row("Responsable / coordinador", esc(o.coordinator))}${row("Descripción y alcance del trabajo", esc(o.description))}</table>
+  <h2>2. Presupuesto autorizado (USD)</h2><table>${row("Materiales", money(num(o.budgetMaterials)))}${row("Movilización / transporte", money(num(o.budgetTransport)))}${row("Mano de obra" + (ref ? " (referencia)" : ""), money(num(o.budgetLabor)))}<tr class="tot"><th>TOTAL PRESUPUESTADO</th><td>${money(c.budget)}</td></tr></table>
+  <h2>3. Plazo y programación</h2><table>${row("Fecha prevista de inicio", esc(o.plannedStart))}${row("Fecha prevista de entrega", esc(o.plannedEnd))}${row("Duración autorizada", esc(o.authorizedDays) + (o.authorizedDays ? " días laborables" : ""))}${row("Personal asignado", esc(o.staff))}${row("Observaciones / hitos", esc(o.notes))}</table>
+  <h2>4. Control y autorización</h2><p style="margin:6px 0">Cualquier gasto adicional o cambio de plazo debe ser aprobado antes de ejecutarse.</p><table>${row("Elaborado / autorizado por", esc(o.authorizedBy))}${row("Recibido por coordinador", esc(o.receivedBy))}${row("Fecha de recepción", esc(o.receivedDate))}</table>
+  <p class="foot">Documento interno de control operativo y presupuestario.</p></body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes para imprimir."); return; }
+  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+}
+
+/* ---- exportación a Excel ---- */
+function OT_exportExcel(rows) {
+  const wb = XLSX.utils.book_new();
+  const ordenes = rows.map((r) => ({
+    "N.º": r.number, Proyecto: r.name, Cliente: r.client, Lugar: r.place, Responsable: r.coordinator, Estado: OT_estadoMeta(r.status).label,
+    "Fecha emisión": r.issue, "Inicio previsto": r.start, "Entrega prevista": r.end, "Entrega real": r.realEnd, "Avance %": r.progress,
+    "Materiales USD": num(r.raw.budgetMaterials), "Transporte USD": num(r.raw.budgetTransport), "Mano de obra USD (ref.)": num(r.raw.budgetLabor),
+    "Total presupuestado USD": r.budget, "Ejecutado USD": r.actual, "Variación USD": r.variance, "Ejecución %": r.execPct,
+    "Atrasada": r.late ? "Sí" : "No", "Entregada a tiempo": r.onTime === null ? "" : r.onTime ? "Sí" : "No",
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ordenes), "Órdenes");
+  const group = (keyFn) => { const m = {}; rows.forEach((r) => { const k = keyFn(r) || "—"; m[k] = m[k] || { n: 0, b: 0, a: 0 }; m[k].n++; m[k].b += r.budget; m[k].a += r.actual; }); return Object.entries(m).map(([k, v]) => ({ Grupo: k, "N.º órdenes": v.n, "Presupuestado USD": r2(v.b), "Ejecutado USD": r2(v.a), "Variación USD": r2(v.a - v.b) })); };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(group((r) => r.issue ? r.issue.slice(0, 7) : "")), "Por mes");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(group((r) => r.client)), "Por cliente");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(group((r) => r.coordinator)), "Por responsable");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(group((r) => OT_estadoMeta(r.status).label)), "Por estado");
+  XLSX.writeFile(wb, "ordenes_de_trabajo_" + todayISO() + ".xlsx");
+}
+
+function OT_recommendations(rows) {
+  const out = [];
+  const act = rows.filter((r) => r.status !== "anulada");
+  const late = act.filter((r) => r.late);
+  if (late.length) out.push(`${late.length} orden(es) atrasadas respecto a la fecha prevista de entrega: ${late.slice(0, 4).map((r) => "N.º " + r.number).join(", ")}. Confirmar nuevo plazo con el coordinador antes de continuar.`);
+  const over = act.filter((r) => r.over);
+  if (over.length) out.push(`${over.length} orden(es) superan su presupuesto autorizado (sobrecosto total ${money(over.reduce((a, r) => a + r.variance, 0))}). Todo gasto adicional debe aprobarse antes de ejecutarse.`);
+  const near = act.filter((r) => !r.over && !r.terminal && r.budget > 0 && r.execPct >= 90);
+  if (near.length) out.push(`${near.length} orden(es) ya consumieron 90% o más de su presupuesto sin estar entregadas.`);
+  const noDates = act.filter((r) => !r.terminal && (!r.start || !r.end));
+  if (noDates.length) out.push(`${noDates.length} orden(es) sin fechas previstas de inicio o entrega: no se pueden controlar los plazos.`);
+  const noRec = act.filter((r) => r.status !== "borrador" && !r.raw.receivedDate);
+  if (noRec.length) out.push(`${noRec.length} orden(es) sin fecha de recepción por el coordinador.`);
+  const done = act.filter((r) => r.onTime !== null);
+  if (done.length) { const ok = done.filter((r) => r.onTime).length; out.push(`Cumplimiento de plazo en órdenes entregadas: ${Math.round((ok / done.length) * 100)}% (${ok} de ${done.length}).`); }
+  if (!out.length) out.push("Las órdenes de trabajo están en control: sin atrasos ni sobrecostos.");
+  return out;
+}
+
+/* ---- módulo ---- */
+function OT_Module({ orders, setOrders, cpProjects }) {
+  const now = new Date();
+  const [tab, setTab] = useState("resumen");
+  const [editing, setEditing] = useState(null); // objeto en edición
+  const [isNew, setIsNew] = useState(false);
+  const [fYear, setFYear] = useState("todos");
+  const [fMonth, setFMonth] = useState("todos");
+  const [fEstado, setFEstado] = useState("todos");
+  const [fClient, setFClient] = useState("todos");
+  const [fCoord, setFCoord] = useState("todos");
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState({ key: "number", dir: "desc" });
+  const [confirmId, setConfirmId] = useState(null);
+
+  const rows = useMemo(() => OT_buildRows(orders), [orders]);
+  const years = useMemo(() => [...new Set([String(now.getFullYear()), ...rows.map((r) => r.issue.slice(0, 4)).filter(Boolean)])].sort().reverse(), [rows]);
+  const clients = useMemo(() => [...new Set(rows.map((r) => r.client))].sort(), [rows]);
+  const coords = useMemo(() => [...new Set(rows.map((r) => r.coordinator))].sort(), [rows]);
+
+  const filtered = rows.filter((r) =>
+    (fYear === "todos" || r.issue.slice(0, 4) === fYear) &&
+    (fMonth === "todos" || Number(r.issue.slice(5, 7)) === Number(fMonth)) &&
+    (fEstado === "todos" || r.status === fEstado || (fEstado === "atrasada" && r.late)) &&
+    (fClient === "todos" || r.client === fClient) && (fCoord === "todos" || r.coordinator === fCoord) &&
+    (!q.trim() || (r.name + " " + r.client + " " + r.place + " " + r.number).toLowerCase().includes(q.trim().toLowerCase())));
+  const valid = filtered.filter((r) => r.status !== "anulada");
+  const hayFiltros = fYear !== "todos" || fMonth !== "todos" || fEstado !== "todos" || fClient !== "todos" || fCoord !== "todos" || q;
+  const reset = () => { setFYear("todos"); setFMonth("todos"); setFEstado("todos"); setFClient("todos"); setFCoord("todos"); setQ(""); };
+
+  const totB = r2(valid.reduce((a, r) => a + r.budget, 0));
+  const totA = r2(valid.reduce((a, r) => a + r.actual, 0));
+  const enEjec = valid.filter((r) => !r.terminal).length;
+  const atrasadas = valid.filter((r) => r.late).length;
+  const sobre = valid.filter((r) => r.over).length;
+  const entreg = valid.filter((r) => r.onTime !== null);
+  const aTiempo = entreg.length ? Math.round((entreg.filter((r) => r.onTime).length / entreg.length) * 100) : null;
+  const ticket = valid.length ? r2(totB / valid.length) : 0;
+
+  const chartYear = fYear === "todos" ? now.getFullYear() : Number(fYear);
+  const monthData = RES_MESES.map((label, i) => {
+    const m = i + 1;
+    const inM = rows.filter((r) => r.status !== "anulada" && r.issue && Number(r.issue.slice(0, 4)) === chartYear && Number(r.issue.slice(5, 7)) === m &&
+      (fEstado === "todos" || r.status === fEstado) && (fClient === "todos" || r.client === fClient) && (fCoord === "todos" || r.coordinator === fCoord));
+    return { label, m, n: inM.length, a: r2(inM.reduce((s, r) => s + r.budget, 0)), b: r2(inM.reduce((s, r) => s + r.actual, 0)),
+      emit: inM.length, entr: inM.filter((r) => r.terminal).length };
+  });
+  const estadoGroups = OT_ESTADOS.map((e) => ({ ...e, count: filtered.filter((r) => r.status === e.key).length }));
+  const group = (keyFn, valFn) => { const m = {}; valid.forEach((r) => { const k = keyFn(r); m[k] = (m[k] || 0) + valFn(r); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); };
+  const byClient = group((r) => r.client, (r) => r.budget);
+  const byCoord = group((r) => r.coordinator, (r) => r.budget);
+  const comp = {
+    mat: valid.reduce((a, r) => a + num(r.raw.budgetMaterials), 0),
+    trans: valid.reduce((a, r) => a + num(r.raw.budgetTransport), 0),
+    lab: valid.reduce((a, r) => a + (r.raw.laborIsReference !== false ? 0 : num(r.raw.budgetLabor)), 0),
+  };
+  const compTot = comp.mat + comp.trans + comp.lab;
+
+  const sorted = [...filtered].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key];
+    const c = typeof av === "number" && typeof bv === "number" ? av - bv : String(av || "").localeCompare(String(bv || ""), "es");
+    return sort.dir === "asc" ? c : -c;
+  });
+  const sk = (key) => setSort((s) => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  const Th = ({ k, children, right }) => <th className="font-medium pb-2 pr-3 cursor-pointer select-none whitespace-nowrap" style={{ textAlign: right ? "right" : "left" }} onClick={() => sk(k)}>{children}{sort.key === k ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}</th>;
+
+  const startNew = () => { setEditing(OT_blank(orders)); setIsNew(true); setTab("ordenes"); };
+  const startEdit = (id) => { const o = orders.find((x) => x.id === id); if (o) { setEditing({ ...OT_blank([]), ...o }); setIsNew(false); setTab("ordenes"); } };
+  const save = (o) => { setOrders((prev) => prev.some((x) => x.id === o.id) ? prev.map((x) => x.id === o.id ? o : x) : [o, ...prev]); setEditing(null); };
+  const remove = (id) => { setOrders((prev) => prev.filter((x) => x.id !== id)); setConfirmId(null); };
+
+  const Header = (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <SubTabs tabs={[["resumen", "Resumen"], ["ordenes", "Órdenes"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setEditing(null); }} />
+      <button onClick={startNew} className="btn-primary text-xs py-2 px-3 flex items-center gap-1" style={{ display: "inline-flex" }}><Plus size={13} />Nueva orden de trabajo</button>
+    </div>
+  );
+
+  if (editing) {
+    return (
+      <div className="space-y-6">
+        {Header}
+        <OT_Form key={editing.id} initial={editing} isNew={isNew} cpProjects={cpProjects} onSave={save} onCancel={() => setEditing(null)} />
+      </div>
+    );
+  }
+
+  const Filters = (
+    <Panel>
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div><label className="field-label">Año (emisión)</label><select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+        <div><label className="field-label">Mes</label><select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+        <div><label className="field-label">Estado</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option>{OT_ESTADOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}<option value="atrasada">Atrasadas</option></select></div>
+        <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+        <div><label className="field-label">Responsable</label><select className="field" value={fCoord} onChange={(e) => setFCoord(e.target.value)}><option value="todos">Todos</option>{coords.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+        <div><label className="field-label">Buscar</label><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Proyecto, cliente, N.º…" /></div>
+      </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+        <p className="text-xs" style={{ color: "var(--text-600)" }}>{filtered.length} orden(es) en el filtro{rows.length !== filtered.length ? " de " + rows.length : ""}</p>
+        {hayFiltros && <button onClick={reset} className="btn-ghost py-1 px-3 text-xs">Restablecer filtros</button>}
+      </div>
+    </Panel>
+  );
+
+  if (tab === "resumen") {
+    return (
+      <div className="space-y-6">
+        {Header}
+        {Filters}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard accent={COLORS.ink}><p className="kpi-number">{valid.length}</p><p className="kpi-label">Órdenes de trabajo (sin anuladas)</p></KpiCard>
+          <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto autorizado total</p></KpiCard>
+          <KpiCard accent={totA > totB ? COLORS.red : COLORS.green}><p className="kpi-number">{money(totA)}</p><p className="kpi-label">Ejecutado · {totB ? Math.round((totA / totB) * 100) : 0}% · {totA > totB ? "sobrecosto " : "saldo "}{money(Math.abs(totB - totA))}</p></KpiCard>
+          <KpiCard accent={COLORS.amber}><p className="kpi-number">{enEjec}</p><p className="kpi-label">Abiertas (no entregadas)</p></KpiCard>
+          <KpiCard accent={atrasadas ? COLORS.red : COLORS.green}><p className="kpi-number">{atrasadas}</p><p className="kpi-label">Atrasadas</p></KpiCard>
+          <KpiCard accent={sobre ? COLORS.red : COLORS.green}><p className="kpi-number">{sobre}</p><p className="kpi-label">Sobre presupuesto</p></KpiCard>
+          <KpiCard accent={aTiempo !== null && aTiempo < 80 ? COLORS.amber : COLORS.green}><p className="kpi-number">{aTiempo === null ? "—" : aTiempo + "%"}</p><p className="kpi-label">Entregadas a tiempo</p></KpiCard>
+          <KpiCard accent="var(--steel-300)"><p className="kpi-number">{money(ticket)}</p><p className="kpi-label">Valor promedio por orden</p></KpiCard>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel><PanelHeader title={"Órdenes emitidas y cerradas por mes · " + chartYear} />
+            <OT_GroupedBars data={monthData.map((d) => ({ ...d, a: d.emit, b: d.entr }))} colors={[COLORS.ink, COLORS.green]} names={["Emitidas", "Entregadas/cerradas"]} selected={fMonth === "todos" ? null : Number(fMonth)} onPick={(m) => { setFMonth(String(m)); if (fYear === "todos") setFYear(String(chartYear)); }} /></Panel>
+          <Panel><PanelHeader title={"Presupuesto vs. ejecutado por mes (USD) · " + chartYear} />
+            <OT_GroupedBars data={monthData} colors={[COLORS.steel, COLORS.amber]} names={["Presupuestado", "Ejecutado"]} fmt={(v) => "$" + Math.round(v)} selected={fMonth === "todos" ? null : Number(fMonth)} onPick={(m) => { setFMonth(String(m)); if (fYear === "todos") setFYear(String(chartYear)); }} /></Panel>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel><PanelHeader title="Estado de las órdenes (clic para filtrar)" />
+            <RES_ProjectStatusDonut groups={estadoGroups} total={filtered.length} active={fEstado} onPick={setFEstado} unit={["orden", "órdenes"]} /></Panel>
+          <Panel><PanelHeader title="Composición del presupuesto" />
+            {compTot > 0 ? (
+              <div>
+                <div style={{ display: "flex", height: 22, borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ width: (comp.mat / compTot) * 100 + "%", background: COLORS.ink }} title="Materiales" />
+                  <div style={{ width: (comp.trans / compTot) * 100 + "%", background: COLORS.amber }} title="Transporte" />
+                  <div style={{ width: (comp.lab / compTot) * 100 + "%", background: COLORS.green }} title="Mano de obra" />
+                </div>
+                <div className="mt-3 space-y-1 text-xs" style={{ color: "var(--text-600)" }}>
+                  <p><span style={{ color: COLORS.ink }}>■</span> Materiales: {money(comp.mat)} · {Math.round((comp.mat / compTot) * 100)}%</p>
+                  <p><span style={{ color: COLORS.amber }}>■</span> Movilización / transporte: {money(comp.trans)} · {Math.round((comp.trans / compTot) * 100)}%</p>
+                  <p><span style={{ color: COLORS.green }}>■</span> Mano de obra (solo las que suman al total): {money(comp.lab)} · {Math.round((comp.lab / compTot) * 100)}%</p>
+                </div>
+              </div>
+            ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin presupuesto registrado con estos filtros.</p>}</Panel>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel><PanelHeader title="Presupuesto por cliente (clic para filtrar)" /><OT_HBars items={byClient} fmt={money} color={COLORS.amber} active={fClient} onPick={setFClient} /></Panel>
+          <Panel><PanelHeader title="Presupuesto por responsable (clic para filtrar)" /><OT_HBars items={byCoord} fmt={money} color={COLORS.ink} active={fCoord} onPick={setFCoord} /></Panel>
+        </div>
+
+        <Panel><PanelHeader title="Presupuesto vs. ejecutado por orden" />
+          <OT_HBars items={[...valid].sort((a, b) => b.budget - a.budget).map((r) => ({ label: "N.º " + r.number + " · " + r.name, value: r.budget, sub: "ejec. " + money(r.actual) + " (" + r.execPct + "%)", color: r.over ? COLORS.red : r.execPct >= 90 ? COLORS.amber : COLORS.green }))} fmt={money} max={12} onPick={null} /></Panel>
+
+        <Panel><PanelHeader title="Recomendaciones" />
+          <ul className="space-y-2 text-sm" style={{ color: "var(--text-900)" }}>{OT_recommendations(filtered).map((t, i) => <li key={i}>· {t}</li>)}</ul></Panel>
+      </div>
+    );
+  }
+
+  if (tab === "ordenes") {
+    return (
+      <div className="space-y-6">
+        {Header}
+        {Filters}
+        <Panel>
+          {sorted.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
+                  <Th k="number">N.º</Th><Th k="name">Proyecto</Th><Th k="client">Cliente</Th><Th k="coordinator">Responsable</Th><Th k="status">Estado</Th><Th k="issue">Emisión</Th><Th k="end">Entrega prev.</Th>
+                  <Th k="budget" right>Presupuesto</Th><Th k="actual" right>Ejecutado</Th><Th k="execPct" right>Ejec.</Th><th />
+                </tr></thead>
+                <tbody>
+                  {sorted.map((r) => {
+                    const em = OT_estadoMeta(r.status);
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                        <td className="py-2 pr-3 font-medium">{r.number}</td>
+                        <td className="py-2 pr-3 font-medium cursor-pointer" style={{ color: "var(--text-900)" }} onClick={() => startEdit(r.id)}>{r.name}</td>
+                        <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{r.client}</td>
+                        <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{r.coordinator}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: em.color, marginRight: 6 }} />{em.label}{r.late ? <span style={{ color: COLORS.red, marginLeft: 6, fontSize: 11 }}>atrasada</span> : null}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{fdate(r.issue)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{fdate(r.end)}</td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budget)}</td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap" style={{ color: r.over ? COLORS.red : "var(--text-900)" }}>{money(r.actual)}</td>
+                        <td className="py-2 pr-3 text-right" style={{ color: r.over ? COLORS.red : "var(--text-900)" }}>{r.execPct}%</td>
+                        <td className="py-2 whitespace-nowrap text-right">
+                          {confirmId === r.id ? (
+                            <span><button className="text-xs mr-2" style={{ color: COLORS.red }} onClick={() => remove(r.id)}>Eliminar</button><button className="text-xs" style={{ color: "var(--text-400)" }} onClick={() => setConfirmId(null)}>Cancelar</button></span>
+                          ) : (
+                            <span className="flex items-center gap-3 justify-end">
+                              <button aria-label="Editar" title="Editar" onClick={() => startEdit(r.id)} style={{ color: "var(--text-400)" }}><Pencil size={14} /></button>
+                              <button aria-label="Imprimir" title="Imprimir / PDF" onClick={() => OT_printOrder(r.raw)} style={{ color: "var(--text-400)" }}><Printer size={14} /></button>
+                              <button aria-label="Eliminar" title="Eliminar" onClick={() => setConfirmId(r.id)} style={{ color: "var(--text-400)" }}><Trash2 size={14} /></button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>{rows.length ? "No hay órdenes con estos filtros." : "Aún no hay órdenes de trabajo. Crea la primera con «Nueva orden de trabajo»."}</p>}
+        </Panel>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {Header}
+      {Filters}
+      <Panel>
+        <PanelHeader title="Excel de respaldo" />
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Exporta lo que está filtrado. Hojas: Órdenes, Por mes, Por cliente, Por responsable y Por estado.</p>
+        <button onClick={() => OT_exportExcel(sorted)} className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }}><Download size={14} />Descargar Excel</button>
+      </Panel>
+      <Panel>
+        <PanelHeader title="Resumen por cliente" />
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2">Cliente</th><th className="font-medium pb-2 text-right">Órdenes</th><th className="font-medium pb-2 text-right">Presupuestado</th><th className="font-medium pb-2 text-right">Ejecutado</th><th className="font-medium pb-2 text-right">Variación</th></tr></thead>
+          <tbody>
+            {clients.filter((c) => valid.some((r) => r.client === c)).map((c) => {
+              const rs = valid.filter((r) => r.client === c); const b = r2(rs.reduce((a, r) => a + r.budget, 0)); const a = r2(rs.reduce((x, r) => x + r.actual, 0));
+              return <tr key={c} style={{ borderTop: "1px solid var(--steel-100)" }}><td className="py-1.5 pr-2">{c}</td><td className="py-1.5 text-right">{rs.length}</td><td className="py-1.5 text-right">{money(b)}</td><td className="py-1.5 text-right">{money(a)}</td><td className="py-1.5 text-right" style={{ color: a > b ? COLORS.red : COLORS.green }}>{money(a - b)}</td></tr>;
+            })}
+            {!valid.length && <tr><td colSpan={5} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin datos.</td></tr>}
+          </tbody></table></div>
+      </Panel>
+      <Panel><PanelHeader title="Recomendaciones" />
+        <ul className="space-y-2 text-sm" style={{ color: "var(--text-900)" }}>{OT_recommendations(filtered).map((t, i) => <li key={i}>· {t}</li>)}</ul></Panel>
+    </div>
+  );
+}
+
 /* ===== RESUMEN + APP MAESTRA ===== */
 /* ---------------------------------- resumen general (panel gerencial) ---------------------------------- */
 
@@ -3677,7 +4225,8 @@ function RES_MonthlyChart({ rows, year, month, onPickMonth }) {
   );
 }
 
-function RES_ProjectStatusDonut({ groups, total, active, onPick }) {
+function RES_ProjectStatusDonut({ groups, total, active, onPick, unit }) {
+  const u = unit || ["proyecto", "proyectos"];
   const size = 150, stroke = 20, r = (size - stroke) / 2, c = 2 * Math.PI * r;
   let offset = 0;
   return (
@@ -3697,7 +4246,7 @@ function RES_ProjectStatusDonut({ groups, total, active, onPick }) {
           return el;
         })}
         <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fontSize="22" fontWeight="700" fill="var(--text-900)" fontFamily="var(--font-display)">{total}</text>
-        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fontSize="10" fill="var(--text-400)">{total === 1 ? "proyecto" : "proyectos"}</text>
+        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fontSize="10" fill="var(--text-400)">{total === 1 ? u[0] : u[1]}</text>
       </svg>
       <div className="space-y-1.5">
         {groups.map((g) => (
@@ -3769,7 +4318,7 @@ function RES_ClientBars({ rows, active, onPick }) {
   );
 }
 
-function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, cajaExpenses, goTo }) {
+function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, cajaExpenses, otOrders, goTo }) {
   const now = new Date();
   const [fYear, setFYear] = useState(String(now.getFullYear()));
   const [fMonth, setFMonth] = useState("todos");
@@ -3861,7 +4410,15 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
   if (cajaBalance.totalFunds > 0 && cajaBalance.balance < cajaBalance.totalFunds * 0.2) {
     alerts.push({ mod: "Caja chica", text: `El saldo disponible (${money(cajaBalance.balance)}) está por debajo del 20% del total entregado histórico.` });
   }
-  const SECTIONS = [["proyectos", "Control de proyectos"], ["calendario", "Calendario"], ["materiales", "Planos y materiales"], ["actas", "Actas y órdenes"], ["caja", "Caja chica"]];
+  const otRows = OT_buildRows(otOrders || []).filter((r) => r.status !== "anulada");
+  const otAbiertas = otRows.filter((r) => !r.terminal).length;
+  const otAtras = otRows.filter((r) => r.late);
+  const otSobre = otRows.filter((r) => r.over);
+  const otPres = r2(otRows.reduce((a, r) => a + r.budget, 0));
+  const otEjec = r2(otRows.reduce((a, r) => a + r.actual, 0));
+  otAtras.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" atrasada respecto a su fecha de entrega.` }));
+  otSobre.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" supera su presupuesto en ${money(r.variance)}.` }));
+  const SECTIONS = [["proyectos", "Control de proyectos"], ["calendario", "Calendario"], ["materiales", "Planos y materiales"], ["actas", "Actas y órdenes"], ["ordenes", "Órdenes de trabajo"], ["caja", "Caja chica"]];
 
   const Th = ({ k, children, right }) => (
     <th className="font-medium pb-2 pr-3 cursor-pointer select-none whitespace-nowrap" style={{ textAlign: right ? "right" : "left" }} onClick={() => setSortKey(k)}>
@@ -4032,7 +4589,12 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
         )}
       </Panel>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard accent={otAtras.length || otSobre.length ? COLORS.red : COLORS.green}>
+          <p className="kpi-number">{otAbiertas}</p>
+          <p className="kpi-label">Órdenes de trabajo abiertas · {otAtras.length} atrasada(s) · {otSobre.length} sobre presupuesto</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>Presupuesto {money(otPres)} · ejecutado {money(otEjec)}</p>
+        </KpiCard>
         <KpiCard accent={crossings.length > 0 ? COLORS.red : COLORS.green}>
           <p className="kpi-number">{crossings.length}</p>
           <p className="kpi-label">Cruces en el cronograma</p>
@@ -4062,7 +4624,7 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
         )}
       </Panel>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {SECTIONS.map(([key, label]) => (
           <button key={key} onClick={() => goTo(key)} className="panel text-left p-4" style={{ cursor: "pointer" }}>
             <p className="text-sm font-medium" style={{ color: "var(--text-900)" }}>{label}</p>
@@ -4083,6 +4645,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["calendario", "Calendario"],
     ["materiales", "Planos y materiales"],
     ["actas", "Actas y órdenes"],
+    ["ordenes", "Órdenes de trabajo"],
     ["caja", "Caja chica"],
   ];
   return (
@@ -4147,10 +4710,12 @@ function App() {
     (arr) => { const r = arr[0] || {}; return { funds: r.funds || [], expenses: r.expenses || [] }; },
     (state) => [{ id: "caja-chica", name: "Caja chica", client: "", type: "", funds: state.funds, expenses: state.expenses }]);
 
+  const otSync = useDatasetSync("OrdenesTrabajo", [], (arr) => arr, (state) => state.map((o) => ({ ...o, type: "Orden de trabajo" })));
+
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload();
+        proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -4158,8 +4723,8 @@ function App() {
     // eslint-disable-next-line
   }, []);
 
-  const allLoaded = proyectosSync.loaded && calSync.loaded && matSync.loaded && actSync.loaded && cajaSync.loaded;
-  const anyNeedsSetup = proyectosSync.needsSetup || calSync.needsSetup || matSync.needsSetup || actSync.needsSetup || cajaSync.needsSetup;
+  const allLoaded = proyectosSync.loaded && calSync.loaded && matSync.loaded && actSync.loaded && cajaSync.loaded && otSync.loaded;
+  const anyNeedsSetup = proyectosSync.needsSetup || calSync.needsSetup || matSync.needsSetup || actSync.needsSetup || cajaSync.needsSetup || otSync.needsSetup;
 
   if (!allLoaded) {
     return <div className="w-full h-full flex items-center justify-center" style={{ color: "var(--text-400)", fontFamily: "var(--font-body)" }}>Cargando…</div>;
@@ -4176,7 +4741,7 @@ function App() {
         <SetupScreen
           initial={getSyncConfig()}
           onCancel={showSettings ? () => setShowSettings(false) : null}
-          onSave={() => { setShowSettings(false); proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); }}
+          onSave={() => { setShowSettings(false); proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); }}
         />
       </div>
     );
@@ -4213,11 +4778,13 @@ function App() {
   const setCajaFunds = (updater) => cajaSync.setState((prev) => ({ ...prev, funds: typeof updater === "function" ? updater(prev.funds) : updater }));
   const setCajaExpenses = (updater) => cajaSync.setState((prev) => ({ ...prev, expenses: typeof updater === "function" ? updater(prev.expenses) : updater }));
 
+  const setOtOrders = (updater) => otSync.setState((prev) => (typeof updater === "function" ? updater(prev) : updater));
+
   const syncStatus = {
-    error: proyectosSync.syncError || calSync.syncError || matSync.syncError || actSync.syncError || cajaSync.syncError,
-    last: [proyectosSync.lastSynced, calSync.lastSynced, matSync.lastSynced, actSync.lastSynced, cajaSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
+    error: proyectosSync.syncError || calSync.syncError || matSync.syncError || actSync.syncError || cajaSync.syncError || otSync.syncError,
+    last: [proyectosSync.lastSynced, calSync.lastSynced, matSync.lastSynced, actSync.lastSynced, cajaSync.lastSynced, otSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
   };
-  const refreshAll = () => { proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); };
+  const refreshAll = () => { proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); };
 
   return (
     <div className="app-shell">
@@ -4275,7 +4842,7 @@ function App() {
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-8">
             {section === "resumen" ? (
-              <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
+              <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} otOrders={otSync.state} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
             ) : section === "proyectos" ? (
               <CP_Module focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
             ) : section === "calendario" ? (
@@ -4284,6 +4851,8 @@ function App() {
               <MAT_Module projects={matSync.state.projects} updateProject={updateMatProject} createProject={createMatProject} deleteProject={deleteMatProject} visits={matSync.state.visits} setVisits={setMatVisits} cpProjects={proyectosSync.state} />
             ) : section === "actas" ? (
               <ACT_Module docs={actSync.state.docs} setDocs={setActDocs} cpProjects={proyectosSync.state} />
+            ) : section === "ordenes" ? (
+              <OT_Module orders={otSync.state} setOrders={setOtOrders} cpProjects={proyectosSync.state} />
             ) : (
               <CAJA_Module funds={cajaSync.state.funds} setFunds={setCajaFunds} expenses={cajaSync.state.expenses} setExpenses={setCajaExpenses} cpProjects={proyectosSync.state} />
             )}
