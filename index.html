@@ -2080,6 +2080,11 @@ function CAL_ReportingSection({ items, crossings, risks, weeks }) {
         </div>
       </div>
       <Panel>
+        <PanelHeader title="Informe gerencial" />
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Informe imprimible (PDF): Gantt, detalle del cronograma, cruces de recursos y recomendaciones.</p>
+        <button onClick={() => CAL_openReport(items, crossings, weeks)} className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }}><Printer size={14} />Informe gerencial (PDF)</button>
+      </Panel>
+      <Panel>
         <PanelHeader title="Excel del cronograma" />
         <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Cuatro hojas en un solo archivo: Cronograma, Cruces detectados, Riesgos y Carga semanal.</p>
         <button onClick={download} className="btn-primary flex items-center gap-2" disabled={downloading} style={{ display: "inline-flex" }}>
@@ -3648,7 +3653,9 @@ function OT_addWorkdays(startISO, n) {
 function OT_calc(o) {
   const refLab = o.laborIsReference !== false;
   const budget = r2(num(o.budgetMaterials) + num(o.budgetTransport) + (refLab ? 0 : num(o.budgetLabor)));
-  const actual = r2(num(o.actualMaterials) + num(o.actualTransport) + (refLab ? 0 : num(o.actualLabor)));
+  const actual = r2(num(o.actualMaterials) + num(o.actualTransport) + num(o.actualOthers) + (refLab ? 0 : num(o.actualLabor)));
+  const budgetAll = r2(num(o.budgetMaterials) + num(o.budgetTransport) + num(o.budgetLabor));
+  const actualAll = r2(num(o.actualMaterials) + num(o.actualTransport) + num(o.actualOthers) + num(o.actualLabor));
   const variance = r2(actual - budget);
   const execPct = budget > 0 ? Math.round((actual / budget) * 100) : 0;
   const status = o.status || "borrador";
@@ -3664,7 +3671,7 @@ function OT_calc(o) {
     else if (num(o.authorizedDays) > 0 && o.realStart) onTime = OT_workdays(o.realStart, endReal) <= num(o.authorizedDays);
   }
   const level = over || (late && daysBetween(o.plannedEnd, today) > 7) ? "rojo" : late || (budget > 0 && actual > budget * 0.9) ? "amarillo" : "verde";
-  return { budget, actual, variance, execPct, status, terminal, late, over, onTime, level, workdays, labor: num(o.budgetLabor) };
+  return { budget, actual, variance, execPct, status, terminal, late, over, onTime, level, workdays, labor: num(o.budgetLabor), budgetAll, actualAll };
 }
 
 function OT_buildRows(orders) {
@@ -3827,11 +3834,19 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
           <span className="text-lg font-semibold" style={{ fontFamily: "var(--font-display)", color: COLORS.ink }}>{money(c.budget)}</span>
         </div>
         <p className="text-xs font-semibold mt-5 mb-2" style={{ color: "var(--text-600)" }}>Gasto real ejecutado (control)</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div><label className="field-label">Materiales (real)</label><DecimalInput className="field" value={f.actualMaterials} onChange={setV("actualMaterials")} placeholder="0.00" /></div>
-          <div><label className="field-label">Movilización (real)</label><DecimalInput className="field" value={f.actualTransport} onChange={setV("actualTransport")} placeholder="0.00" /></div>
-          <div><label className="field-label">Mano de obra (real)</label><DecimalInput className="field" value={f.actualLabor} onChange={setV("actualLabor")} placeholder="0.00" /></div>
-        </div>
+        {f._exp ? (
+          <div className="p-3 rounded text-xs space-y-1" style={{ background: "var(--steel-100)", color: "var(--text-600)" }}>
+            <p>Esta orden tiene {f._expCount} gasto(s) registrado(s) en <strong>Control de gasto GAM</strong>; el gasto real se calcula desde allí:</p>
+            <p>Materiales {money(num(f.actualMaterials))} · Transporte {money(num(f.actualTransport))} · Mano de obra {money(num(f.actualLabor))} · Otros {money(num(f.actualOthers))}</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div><label className="field-label">Materiales (real)</label><DecimalInput className="field" value={f.actualMaterials} onChange={setV("actualMaterials")} placeholder="0.00" /></div>
+            <div><label className="field-label">Movilización (real)</label><DecimalInput className="field" value={f.actualTransport} onChange={setV("actualTransport")} placeholder="0.00" /></div>
+            <div><label className="field-label">Mano de obra (real)</label><DecimalInput className="field" value={f.actualLabor} onChange={setV("actualLabor")} placeholder="0.00" /></div>
+            <div><label className="field-label">Otros (real)</label><DecimalInput className="field" value={f.actualOthers} onChange={setV("actualOthers")} placeholder="0.00" /></div>
+          </div>
+        )}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2 text-sm">
           <span style={{ color: "var(--text-600)" }}>Ejecutado: <strong>{money(c.actual)}</strong> ({c.execPct}%)</span>
           <span style={{ color: c.variance > 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{c.variance > 0 ? "Sobrecosto: " : "Ahorro: "}{money(Math.abs(c.variance))}</span>
@@ -3931,7 +3946,7 @@ function OT_recommendations(rows) {
 }
 
 /* ---- módulo ---- */
-function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest, onNewHandled }) {
+function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest, onNewHandled, onOpenGastos }) {
   const now = new Date();
   const [tab, setTab] = useState("resumen");
   const [editing, setEditing] = useState(null); // objeto en edición
@@ -4048,7 +4063,7 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
           <KpiCard accent={atrasadas ? COLORS.red : COLORS.green}><p className="kpi-number">{atrasadas}</p><p className="kpi-label">Atrasadas</p></KpiCard>
           <KpiCard accent={sobre ? COLORS.red : COLORS.green}><p className="kpi-number">{sobre}</p><p className="kpi-label">Sobre presupuesto</p></KpiCard>
           <KpiCard accent={aTiempo !== null && aTiempo < 80 ? COLORS.amber : COLORS.green}><p className="kpi-number">{aTiempo === null ? "—" : aTiempo + "%"}</p><p className="kpi-label">Entregadas a tiempo</p></KpiCard>
-          <KpiCard accent="var(--steel-300)"><p className="kpi-number">{money(ticket)}</p><p className="kpi-label">Valor promedio por orden</p></KpiCard>
+          <KpiCard accent={valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0)))}</p><p className="kpi-label">{valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? "Excedente" : "Ahorro"} incluida la mano de obra</p></KpiCard>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -4125,6 +4140,7 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
                             <span><button className="text-xs mr-2" style={{ color: COLORS.red }} onClick={() => remove(r.id)}>Eliminar</button><button className="text-xs" style={{ color: "var(--text-400)" }} onClick={() => setConfirmId(null)}>Cancelar</button></span>
                           ) : (
                             <span className="flex items-center gap-3 justify-end">
+                              <button aria-label="Gastos" title="Ver gastos de la orden" onClick={() => onOpenGastos && onOpenGastos(r.id)} style={{ color: "var(--text-400)", fontWeight: 700, fontSize: 14 }}>$</button>
                               <button aria-label="Editar" title="Editar" onClick={() => startEdit(r.id)} style={{ color: "var(--text-400)" }}><Pencil size={14} /></button>
                               <button aria-label="Imprimir" title="Imprimir / PDF" onClick={() => OT_printOrder(r.raw)} style={{ color: "var(--text-400)" }}><Printer size={14} /></button>
                               <button aria-label="Eliminar" title="Eliminar" onClick={() => setConfirmId(r.id)} style={{ color: "var(--text-400)" }}><Trash2 size={14} /></button>
@@ -4148,9 +4164,9 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
       {Header}
       {Filters}
       <Panel>
-        <PanelHeader title="Excel de respaldo" />
-        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Exporta lo que está filtrado. Hojas: Órdenes, Por mes, Por cliente, Por responsable y Por estado.</p>
-        <button onClick={() => OT_exportExcel(sorted)} className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }}><Download size={14} />Descargar Excel</button>
+        <PanelHeader title="Informe gerencial y Excel" />
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Informe imprimible (PDF) con indicadores, gráficos y recomendaciones; y Excel con lo filtrado. Hojas: Órdenes, Por mes, Por cliente, Por responsable y Por estado.</p>
+        <div className="flex gap-3 flex-wrap"><button onClick={() => OT_openReport(sorted)} className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }}><Printer size={14} />Informe gerencial (PDF)</button><button onClick={() => OT_exportExcel(sorted)} className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }}><Download size={14} />Descargar Excel</button></div>
       </Panel>
       <Panel>
         <PanelHeader title="Resumen por cliente" />
@@ -4166,6 +4182,641 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
       </Panel>
       <Panel><PanelHeader title="Recomendaciones" />
         <ul className="space-y-2 text-sm" style={{ color: "var(--text-900)" }}>{OT_recommendations(filtered).map((t, i) => <li key={i}>· {t}</li>)}</ul></Panel>
+    </div>
+  );
+}
+
+/* ===== INFORMES GERENCIALES (impresión / PDF) ===== */
+
+function RPT_esc(s) {
+  return String(s === undefined || s === null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+}
+
+// Barras horizontales emparejadas (a = referencia, b = real). items: [{label, a, b, bColor}]
+function RPT_barsSvg(items, names, fmt) {
+  if (!items.length) return "";
+  const f = fmt || ((v) => String(Math.round(v)));
+  const W = 700, rowH = 30, L = 200, R = 90;
+  const max = Math.max(1, ...items.map((i) => Math.max(i.a || 0, i.b || 0)));
+  const H = items.length * rowH + 24;
+  let out = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Arial,Helvetica,sans-serif" font-size="10">`;
+  out += `<rect x="${L}" y="4" width="10" height="8" fill="#5A6C80"/><text x="${L + 14}" y="12" fill="#52606D">${RPT_esc(names[0])}</text><rect x="${L + 110}" y="4" width="10" height="8" fill="#E8A33D"/><text x="${L + 124}" y="12" fill="#52606D">${RPT_esc(names[1])}</text>`;
+  items.forEach((it, i) => {
+    const y = 22 + i * rowH;
+    const wa = ((it.a || 0) / max) * (W - L - R), wb = ((it.b || 0) / max) * (W - L - R);
+    const lab = it.label.length > 34 ? it.label.slice(0, 33) + "…" : it.label;
+    out += `<text x="${L - 6}" y="${y + 11}" text-anchor="end" fill="#16202E">${RPT_esc(lab)}</text>`;
+    out += `<rect x="${L}" y="${y}" width="${Math.max(0, wa)}" height="10" fill="#5A6C80" rx="2"/><text x="${L + wa + 4}" y="${y + 9}" fill="#52606D">${RPT_esc(f(it.a || 0))}</text>`;
+    out += `<rect x="${L}" y="${y + 12}" width="${Math.max(0, wb)}" height="10" fill="${it.bColor || "#E8A33D"}" rx="2"/><text x="${L + wb + 4}" y="${y + 21}" fill="#52606D">${RPT_esc(f(it.b || 0))}</text>`;
+  });
+  return out + "</svg>";
+}
+
+// Barras de ahorro (verde, a la derecha) / excedente (rojo, a la izquierda)
+function RPT_divergingSvg(items, fmt) {
+  if (!items.length) return "";
+  const f = fmt || ((v) => String(Math.round(v)));
+  const W = 700, rowH = 22, L = 200, mid = 450, half = 200;
+  const max = Math.max(1, ...items.map((i) => Math.abs(i.value)));
+  const H = items.length * rowH + 10;
+  let out = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Arial,Helvetica,sans-serif" font-size="10"><line x1="${mid}" x2="${mid}" y1="0" y2="${H}" stroke="#C7D2DC"/>`;
+  items.forEach((it, i) => {
+    const y = 4 + i * rowH; const w = (Math.abs(it.value) / max) * half;
+    const lab = it.label.length > 34 ? it.label.slice(0, 33) + "…" : it.label;
+    out += `<text x="${L - 6}" y="${y + 11}" text-anchor="end" fill="#16202E">${RPT_esc(lab)}</text>`;
+    if (it.value >= 0) out += `<rect x="${mid}" y="${y}" width="${w}" height="14" fill="#2F7D5B" rx="2"/><text x="${mid + w + 4}" y="${y + 11}" fill="#2F7D5B">${RPT_esc(f(it.value))}</text>`;
+    else out += `<rect x="${mid - w}" y="${y}" width="${w}" height="14" fill="#C1443D" rx="2"/><text x="${mid - w - 4}" y="${y + 11}" text-anchor="end" fill="#C1443D">${RPT_esc(f(it.value))}</text>`;
+  });
+  return out + "</svg>";
+}
+
+function RPT_ganttSvg(items) {
+  if (!items.length) return "";
+  const starts = items.map((i) => i.startDate), ends = items.map((i) => toISO(CAL_endDateOf(i)));
+  const min = starts.slice().sort()[0], max = ends.slice().sort().pop();
+  const total = Math.max(1, daysBetween(min, max) + 1);
+  const W = 700, L = 200, R = 10, rowH = 20, H = items.length * rowH + 30;
+  const x = (d) => L + (daysBetween(min, d) / total) * (W - L - R);
+  let out = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Arial,Helvetica,sans-serif" font-size="10">`;
+  let d = new Date(min + "T00:00:00"); d = new Date(d.getFullYear(), d.getMonth(), 1);
+  while (toISO(d) <= max) {
+    const iso = toISO(d);
+    if (iso >= min) out += `<line x1="${x(iso)}" x2="${x(iso)}" y1="14" y2="${H}" stroke="#E8ECF1"/><text x="${x(iso) + 2}" y="10" fill="#8797A6">${RES_MESES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}</text>`;
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  const t = todayISO();
+  if (t >= min && t <= max) out += `<line x1="${x(t)}" x2="${x(t)}" y1="14" y2="${H}" stroke="#C1443D" stroke-dasharray="3 2"/>`;
+  items.forEach((it, i) => {
+    const y = 20 + i * rowH; const s = it.startDate, e = toISO(CAL_endDateOf(it));
+    const lab = (it.name || "").length > 34 ? it.name.slice(0, 33) + "…" : it.name || "";
+    out += `<text x="${L - 6}" y="${y + 11}" text-anchor="end" fill="#16202E">${RPT_esc(lab)}</text>`;
+    out += `<rect x="${x(s)}" y="${y + 1}" width="${Math.max(3, x(e) - x(s))}" height="13" fill="${it.status === "completado" ? "#2F7D5B" : it.color || "#5A6C80"}" rx="3"/>`;
+  });
+  return out + "</svg>";
+}
+
+// sections: [{ heading, bullets, table:{head,rows,align}, svg, note }]
+function RPT_open({ title, subtitle, kpis, sections }) {
+  const kp = (kpis || []).map((k) => `<div class="k"><div class="kv" style="color:${k.color || "#12203A"}">${RPT_esc(k.value)}</div><div class="kl">${RPT_esc(k.label)}</div></div>`).join("");
+  const body = (sections || []).map((s) => {
+    let h = `<h2>${RPT_esc(s.heading)}</h2>`;
+    if (s.note) h += `<p class="n">${RPT_esc(s.note)}</p>`;
+    if (s.svg) h += `<div class="svg">${s.svg}</div>`;
+    if (s.bullets && s.bullets.length) h += "<ul>" + s.bullets.map((b) => `<li>${RPT_esc(b)}</li>`).join("") + "</ul>";
+    if (s.table) {
+      const al = s.table.align || [];
+      h += `<table><thead><tr>${s.table.head.map((c, i) => `<th style="text-align:${al[i] || "left"}">${RPT_esc(c)}</th>`).join("")}</tr></thead><tbody>` +
+        s.table.rows.map((r) => `<tr>${r.map((c, i) => { const cell = c && typeof c === "object" ? c : { v: c }; return `<td style="text-align:${al[i] || "left"};${cell.color ? "color:" + cell.color + ";font-weight:600" : ""}">${RPT_esc(cell.v)}</td>`; }).join("")}</tr>`).join("") +
+        `</tbody></table>`;
+    }
+    return h;
+  }).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${RPT_esc(title)}</title><style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#16202E;margin:28px;font-size:12px}.hd{border-bottom:3px solid #12203A;padding-bottom:8px;margin-bottom:14px}
+  .co{font-size:11px;color:#52606D;letter-spacing:.06em;text-transform:uppercase}h1{font-size:20px;margin:2px 0;color:#12203A}.sub{color:#52606D;font-size:12px}
+  .ks{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.k{border:1px solid #C7D2DC;border-radius:6px;padding:8px 12px;min-width:120px;flex:1}.kv{font-size:17px;font-weight:700}.kl{font-size:10px;color:#52606D;margin-top:2px}
+  h2{font-size:13px;background:#12203A;color:#fff;padding:5px 8px;margin:18px 0 8px}ul{margin:6px 0 6px 18px;padding:0}li{margin:3px 0}.n{color:#52606D;font-size:11px;margin:4px 0}
+  table{width:100%;border-collapse:collapse;margin:6px 0;font-size:11px}th,td{border:1px solid #C7D2DC;padding:4px 6px}th{background:#F1F4F7}.svg{margin:6px 0;page-break-inside:avoid}
+  .ft{margin-top:22px;font-size:10px;color:#8797A6;text-align:center}@media print{h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}.k,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body><div class="hd"><div class="co">Soluciones Industriales GAM · Informe gerencial</div><h1>${RPT_esc(title)}</h1><div class="sub">${RPT_esc(subtitle || "")} · Emitido el ${RPT_esc(fdate(todayISO()))}</div></div>
+  <div class="ks">${kp}</div>${body}<p class="ft">Documento interno de control gerencial · Soluciones Industriales GAM</p></body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("El navegador bloqueó la ventana. Permite ventanas emergentes para generar el informe."); return; }
+  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 400);
+}
+
+
+function OT_openReport(rows) {
+  const valid = rows.filter((r) => r.status !== "anulada");
+  const totB = r2(valid.reduce((a, r) => a + r.budget, 0)), totA = r2(valid.reduce((a, r) => a + r.actual, 0));
+  const resAll = r2(valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0));
+  const entreg = valid.filter((r) => r.onTime !== null);
+  const byClient = {}; valid.forEach((r) => { byClient[r.client] = byClient[r.client] || { n: 0, b: 0, a: 0 }; byClient[r.client].n++; byClient[r.client].b += r.budget; byClient[r.client].a += r.actual; });
+  RPT_open({
+    title: "Órdenes de trabajo", subtitle: "Presupuesto, plazos y cumplimiento",
+    kpis: [
+      { label: "Órdenes (sin anuladas)", value: String(valid.length) }, { label: "Presupuesto autorizado", value: money(totB) }, { label: "Ejecutado", value: money(totA) },
+      { label: "Abiertas", value: String(valid.filter((r) => !r.terminal).length) }, { label: "Atrasadas", value: String(valid.filter((r) => r.late).length), color: "#C1443D" },
+      { label: "Sobre presupuesto", value: String(valid.filter((r) => r.over).length), color: "#C1443D" },
+      { label: "Entregadas a tiempo", value: entreg.length ? Math.round((entreg.filter((r) => r.onTime).length / entreg.length) * 100) + "%" : "—" },
+      { label: (resAll >= 0 ? "Ahorro" : "Excedente") + " con mano de obra", value: money(Math.abs(resAll)), color: resAll >= 0 ? "#2F7D5B" : "#C1443D" },
+    ],
+    sections: [
+      { heading: "Presupuesto autorizado vs. ejecutado por orden", svg: RPT_barsSvg(valid.map((r) => ({ label: "N.º " + r.number + " " + r.name, a: r.budget, b: r.actual, bColor: r.over ? "#C1443D" : "#E8A33D" })), ["Presupuesto", "Ejecutado"], (v) => "$" + v.toFixed(0)) },
+      { heading: "Detalle de órdenes", table: { head: ["N.º", "Proyecto", "Cliente", "Estado", "Entrega prev.", "Presupuesto", "Ejecutado", "Ejec."], align: ["left", "left", "left", "left", "left", "right", "right", "right"],
+        rows: valid.map((r) => [r.number, r.name, r.client, OT_estadoMeta(r.status).label + (r.late ? " (atrasada)" : ""), r.end ? fdate(r.end) : "—", money(r.budget), { v: money(r.actual), color: r.over ? "#C1443D" : undefined }, r.execPct + "%"]) } },
+      { heading: "Por cliente", table: { head: ["Cliente", "Órdenes", "Presupuesto", "Ejecutado"], align: ["left", "right", "right", "right"], rows: Object.entries(byClient).map(([k, v]) => [k, v.n, money(v.b), money(v.a)]) } },
+      { heading: "Análisis y recomendaciones", bullets: OT_recommendations(valid) },
+    ],
+  });
+}
+
+function CAL_openReport(items, crossings, weeks) {
+  const sorted = [...items].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const t = todayISO();
+  const late = items.filter((i) => i.status !== "completado" && toISO(CAL_endDateOf(i)) < t);
+  const maxLoad = weeks.length ? Math.max.apply(null, weeks.map((w) => w.count)) : 0;
+  RPT_open({
+    title: "Calendario de proyectos", subtitle: "Cronograma, cruces de recursos y carga de trabajo",
+    kpis: [
+      { label: "Proyectos en cronograma", value: String(items.length) }, { label: "En curso", value: String(items.filter((i) => i.status === "en_curso").length) },
+      { label: "Completados", value: String(items.filter((i) => i.status === "completado").length), color: "#2F7D5B" }, { label: "Atrasados", value: String(late.length), color: "#C1443D" },
+      { label: "Cruces de recursos", value: String(crossings.length), color: crossings.length ? "#C1443D" : undefined }, { label: "Carga máxima semanal", value: String(maxLoad) },
+    ],
+    sections: [
+      { heading: "Cronograma (Gantt)", note: "La línea roja punteada marca hoy.", svg: RPT_ganttSvg(sorted) },
+      { heading: "Detalle del cronograma", table: { head: ["Proyecto", "Cliente", "Recurso", "Inicio", "Días", "Fin", "Estado", "Orden"], align: ["left", "left", "left", "left", "right", "left", "left", "left"],
+        rows: sorted.map((i) => [i.name, i.client || "—", i.resource || "—", fdate(i.startDate), i.durationDays, fdate(toISO(CAL_endDateOf(i))), CAL_ITEM_STATUS_META[i.status].label, i.otNumber ? "OT " + i.otNumber : "—"]) } },
+      { heading: "Cruces de recursos", table: { head: ["Proyecto A", "Proyecto B", "Recurso", "Desde", "Hasta", "Días"], align: ["left", "left", "left", "left", "left", "right"],
+        rows: crossings.length ? crossings.map((c) => [c.a.name, c.b.name, c.resource, fdate(c.start), fdate(c.end), c.days]) : [["Sin cruces detectados", "", "", "", "", ""]] } },
+      { heading: "Análisis y recomendaciones", bullets: CAL_scheduleRecommendations(items, crossings, weeks) },
+    ],
+  });
+}
+
+/* ===== MODULO: CONTROL DE GASTO GAM ===== */
+
+const GAS_CATS = [
+  { key: "materiales", label: "Materiales", color: COLORS.ink },
+  { key: "transporte", label: "Movilización / transporte", color: COLORS.amber },
+  { key: "mano_obra", label: "Mano de obra", color: COLORS.green },
+  { key: "otros", label: "Otros / imprevistos", color: COLORS.steel },
+];
+const GAS_catMeta = (k) => GAS_CATS.find((c) => c.key === k) || GAS_CATS[3];
+
+function OT_withExpenses(orders, expenses) {
+  const by = {};
+  (expenses || []).forEach((e) => { (by[e.otId] = by[e.otId] || []).push(e); });
+  return orders.map((o) => {
+    const list = by[o.id];
+    if (!list || !list.length) return o;
+    const sum = (cat) => r2(list.filter((e) => e.category === cat).reduce((a, e) => a + num(e.amount), 0));
+    return { ...o, actualMaterials: sum("materiales"), actualTransport: sum("transporte"), actualLabor: sum("mano_obra"), actualOthers: sum("otros"), _exp: true, _expCount: list.length };
+  });
+}
+
+function GAS_orderRows(orders) {
+  return orders.filter((o) => o.status !== "anulada").map((o) => {
+    const bMat = num(o.budgetMaterials), bTr = num(o.budgetTransport), bLab = num(o.budgetLabor);
+    const aMat = num(o.actualMaterials), aTr = num(o.actualTransport), aLab = num(o.actualLabor), aOth = num(o.actualOthers);
+    const budgetEx = r2(bMat + bTr), actualEx = r2(aMat + aTr + aOth);
+    const budgetAll = r2(bMat + bTr + bLab), actualAll = r2(actualEx + aLab);
+    return {
+      id: o.id, number: num(o.number), name: o.name || "Sin nombre", client: o.client || "Sin cliente", status: o.status || "borrador", raw: o,
+      bMat, bTr, bLab, aMat, aTr, aLab, aOth,
+      budgetEx, actualEx, resultEx: r2(budgetEx - actualEx), pctEx: budgetEx > 0 ? Math.round((actualEx / budgetEx) * 100) : 0,
+      budgetAll, actualAll, resultAll: r2(budgetAll - actualAll), pctAll: budgetAll > 0 ? Math.round((actualAll / budgetAll) * 100) : 0,
+    };
+  });
+}
+const GAS_pick = (r, basis) => basis === "sin"
+  ? { budget: r.budgetEx, actual: r.actualEx, result: r.resultEx, pct: r.pctEx }
+  : { budget: r.budgetAll, actual: r.actualAll, result: r.resultAll, pct: r.pctAll };
+
+// gastos que ya superaron el presupuesto total (con MO) y no están marcados como aprobados
+function GAS_unapproved(rows, expenses) {
+  const out = [];
+  rows.forEach((r) => {
+    if (r.budgetAll <= 0) return;
+    let cum = 0;
+    expenses.filter((e) => e.otId === r.id).sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach((e) => {
+      cum += num(e.amount);
+      if (cum > r.budgetAll + 0.004 && !e.approved) out.push({ e, r });
+    });
+  });
+  return out;
+}
+
+function GAS_StackedBars({ data, year }) {
+  const W = 720, H = 230, L = 46, R = 10, T = 14, B = 28;
+  const max = Math.max(1, ...data.map((d) => d.total));
+  const cw = (W - L - R) / 12, bw = Math.min(26, cw * 0.6);
+  const yOf = (v) => T + (H - T - B) * (1 - v / max);
+  return (
+    <div>
+      <div className="flex items-center gap-4 flex-wrap text-xs mb-2" style={{ color: "var(--text-600)" }}>
+        {GAS_CATS.map((c) => <span key={c.key} className="flex items-center gap-1"><span style={{ width: 10, height: 10, background: c.color, borderRadius: 2 }} />{c.label}</span>)}
+        <span style={{ color: "var(--text-400)" }}>Año {year}</span>
+      </div>
+      <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+        {[0, 0.5, 1].map((f, i) => <g key={i}><line x1={L} x2={W - R} y1={yOf(max * f)} y2={yOf(max * f)} stroke="var(--steel-100)" /><text x={L - 5} y={yOf(max * f) + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{"$" + Math.round(max * f)}</text></g>)}
+        {data.map((d, i) => {
+          const cx = L + cw * i + cw / 2; let acc = 0;
+          return (
+            <g key={i}>
+              {GAS_CATS.map((c) => { const v = d.vals[c.key] || 0; const y0 = yOf(acc + v), h = yOf(acc) - y0; acc += v; return h > 0 ? <rect key={c.key} x={cx - bw / 2} y={y0} width={bw} height={h} fill={c.color} /> : null; })}
+              {d.total > 0 && <text x={cx} y={yOf(d.total) - 3} textAnchor="middle" fontSize="9" fill="var(--text-600)">{"$" + Math.round(d.total)}</text>}
+              <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fill="var(--text-600)">{d.label}</text>
+              <title>{d.label + ": " + money(d.total)}</title>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function GAS_CumLine({ points, budget, year }) {
+  const W = 720, H = 220, L = 50, R = 12, T = 14, B = 26;
+  const max = Math.max(1, budget, ...points.map((p) => p.cum));
+  const cw = (W - L - R) / 11;
+  const xOf = (i) => L + cw * i, yOf = (v) => T + (H - T - B) * (1 - v / max);
+  const line = points.map((p, i) => xOf(i) + "," + yOf(p.cum)).join(" ");
+  return (
+    <div>
+      <div className="flex items-center gap-4 flex-wrap text-xs mb-2" style={{ color: "var(--text-600)" }}>
+        <span className="flex items-center gap-1"><span style={{ width: 14, borderTop: "2px solid " + COLORS.amber }} />Gasto acumulado {year}</span>
+        <span className="flex items-center gap-1"><span style={{ width: 14, borderTop: "2px dashed " + COLORS.red }} />Presupuesto total ({money(budget)})</span>
+      </div>
+      <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+        {[0, 0.5, 1].map((f, i) => <g key={i}><line x1={L} x2={W - R} y1={yOf(max * f)} y2={yOf(max * f)} stroke="var(--steel-100)" /><text x={L - 5} y={yOf(max * f) + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{"$" + Math.round(max * f)}</text></g>)}
+        {budget > 0 && <line x1={L} x2={W - R} y1={yOf(budget)} y2={yOf(budget)} stroke={COLORS.red} strokeDasharray="5 3" />}
+        <polyline points={line} fill="none" stroke={COLORS.amber} strokeWidth="2.5" />
+        {points.map((p, i) => <g key={i}><circle cx={xOf(i)} cy={yOf(p.cum)} r="3" fill={COLORS.amber} /><text x={xOf(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="var(--text-600)">{p.label}</text><title>{p.label + ": " + money(p.cum)}</title></g>)}
+      </svg>
+    </div>
+  );
+}
+
+function GAS_OrderBars({ rows, basis, onPick }) {
+  const list = [...rows].sort((a, b) => GAS_pick(b, basis).budget - GAS_pick(a, basis).budget);
+  if (!list.length) return <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin órdenes con estos filtros.</p>;
+  const max = Math.max(1, ...list.map((r) => Math.max(GAS_pick(r, basis).budget, GAS_pick(r, basis).actual)));
+  return (
+    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+      <div className="flex items-center gap-4 text-xs" style={{ color: "var(--text-600)" }}>
+        <span className="flex items-center gap-1"><span style={{ width: 10, height: 6, background: COLORS.steel, borderRadius: 2 }} />Presupuesto</span>
+        <span className="flex items-center gap-1"><span style={{ width: 10, height: 6, background: COLORS.amber, borderRadius: 2 }} />Gasto real</span>
+      </div>
+      {list.map((r) => {
+        const p = GAS_pick(r, basis);
+        return (
+          <div key={r.id} style={{ cursor: onPick ? "pointer" : "default" }} onClick={() => onPick && onPick(r.id)}>
+            <div className="flex items-center justify-between text-xs mb-1 gap-2">
+              <span className="truncate" style={{ color: "var(--text-900)", fontWeight: 500 }}>N.º {r.number} · {r.name}</span>
+              <span className="shrink-0" style={{ color: p.result < 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{p.result < 0 ? "Excedente " : "Ahorro "}{money(Math.abs(p.result))}</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden", marginBottom: 2 }}><div style={{ height: "100%", width: (p.budget / max) * 100 + "%", background: COLORS.steel }} /></div>
+            <div style={{ height: 6, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden" }}><div style={{ height: "100%", width: (p.actual / max) * 100 + "%", background: p.result < 0 ? COLORS.red : COLORS.amber }} /></div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GAS_Diverging({ rows, basis }) {
+  const list = [...rows].map((r) => ({ r, v: GAS_pick(r, basis).result })).sort((a, b) => a.v - b.v);
+  if (!list.length) return <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin órdenes con estos filtros.</p>;
+  const max = Math.max(1, ...list.map((x) => Math.abs(x.v)));
+  return (
+    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+      {list.map(({ r, v }) => (
+        <div key={r.id}>
+          <div className="flex items-center justify-between text-xs mb-0.5 gap-2"><span className="truncate" style={{ color: "var(--text-900)" }}>N.º {r.number} · {r.name}</span><span style={{ color: v < 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{money(v)}</span></div>
+          <div style={{ display: "flex", height: 8 }}>
+            <div style={{ width: "50%", display: "flex", justifyContent: "flex-end" }}>{v < 0 && <div style={{ width: (Math.abs(v) / max) * 100 + "%", background: COLORS.red, borderRadius: "999px 0 0 999px" }} />}</div>
+            <div style={{ width: 1, background: "var(--steel-300)" }} />
+            <div style={{ width: "50%" }}>{v >= 0 && <div style={{ width: (v / max) * 100 + "%", background: COLORS.green, borderRadius: "0 999px 999px 0" }} />}</div>
+          </div>
+        </div>
+      ))}
+      <p className="text-[11px]" style={{ color: "var(--text-400)" }}>Verde = ahorro · Rojo = excedente sobre el presupuesto.</p>
+    </div>
+  );
+}
+
+function GAS_recs(rows, exps, basis) {
+  const out = [];
+  const exc = rows.filter((r) => GAS_pick(r, basis).result < -0.004);
+  if (exc.length) out.push(`${exc.length} orden(es) con excedente sobre presupuesto (${money(exc.reduce((a, r) => a + GAS_pick(r, basis).result, 0))}). Prioriza: ${exc.sort((a, b) => GAS_pick(a, basis).result - GAS_pick(b, basis).result).slice(0, 3).map((r) => "N.º " + r.number).join(", ")}.`);
+  const near = rows.filter((r) => { const p = GAS_pick(r, basis); return p.result >= 0 && p.budget > 0 && p.pct >= 85 && r.status !== "entregada" && r.status !== "cerrada"; });
+  if (near.length) out.push(`${near.length} orden(es) abiertas ya consumieron 85% o más del presupuesto: ${near.slice(0, 4).map((r) => "N.º " + r.number).join(", ")}. Congela gastos nuevos hasta revisar el avance físico.`);
+  const un = GAS_unapproved(rows, exps);
+  if (un.length) out.push(`${un.length} gasto(s) por ${money(un.reduce((a, x) => a + num(x.e.amount), 0))} superaron el presupuesto sin marcar aprobación previa. Regulariza la autorización del gasto adicional.`);
+  const ahorro = rows.filter((r) => (r.status === "entregada" || r.status === "cerrada") && GAS_pick(r, basis).result > 0);
+  if (ahorro.length) out.push(`${ahorro.length} orden(es) cerradas con ahorro total de ${money(ahorro.reduce((a, r) => a + GAS_pick(r, basis).result, 0))}: documenta qué se hizo bien para replicarlo.`);
+  const sinGasto = rows.filter((r) => r.status === "en_ejecucion" && r.actualAll === 0);
+  if (sinGasto.length) out.push(`${sinGasto.length} orden(es) en ejecución sin gastos registrados: confirma que el registro esté al día.`);
+  const labBud = rows.reduce((a, r) => a + r.bLab, 0), labAct = rows.reduce((a, r) => a + r.aLab, 0);
+  if (labBud > 0 || labAct > 0) out.push(`Mano de obra: referencia ${money(labBud)} · real ${money(labAct)} (${labAct > labBud ? "excede " : "por debajo en "}${money(Math.abs(labAct - labBud))}).`);
+  if (!out.length) out.push("Los gastos están dentro del presupuesto de todas las órdenes.");
+  return out;
+}
+
+function GAS_exportExcel(rows, exps, orderLabel) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exps.map((e) => ({
+    Fecha: e.date, Orden: orderLabel(e.otId), Categoría: GAS_catMeta(e.category).label, Concepto: e.concept, Proveedor: e.supplier || "", Documento: e.document || "", "Personal": e.worker || "",
+    Cantidad: num(e.qty) || "", "Costo unitario": num(e.unit) || "", "Monto USD": num(e.amount), "Aprobado (sobre presupuesto)": e.approved ? "Sí" : "No", Notas: e.notes || "",
+  }))), "Gastos");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((r) => ({
+    "N.º": r.number, Proyecto: r.name, Cliente: r.client, Estado: OT_estadoMeta(r.status).label,
+    "Pres. materiales": r.bMat, "Pres. transporte": r.bTr, "Pres. mano de obra": r.bLab, "Pres. total sin MO": r.budgetEx, "Pres. total con MO": r.budgetAll,
+    "Real materiales": r.aMat, "Real transporte": r.aTr, "Real mano de obra": r.aLab, "Real otros": r.aOth, "Real total sin MO": r.actualEx, "Real total con MO": r.actualAll,
+    "Resultado sin MO (+ahorro / −excedente)": r.resultEx, "Resultado con MO (+ahorro / −excedente)": r.resultAll, "Ejecución % con MO": r.pctAll,
+  }))), "Por orden");
+  const grp = (keyFn) => { const m = {}; exps.forEach((e) => { const k = keyFn(e) || "—"; m[k] = m[k] || { n: 0, t: 0 }; m[k].n++; m[k].t += num(e.amount); }); return Object.entries(m).map(([k, v]) => ({ Grupo: k, "N.º gastos": v.n, "Total USD": r2(v.t) })).sort((a, b) => b["Total USD"] - a["Total USD"]); };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grp((e) => GAS_catMeta(e.category).label)), "Por categoría");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grp((e) => (e.date || "").slice(0, 7))), "Por mes");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grp((e) => e.supplier)), "Por proveedor");
+  XLSX.writeFile(wb, "control_de_gasto_GAM_" + todayISO() + ".xlsx");
+}
+
+function GAS_openReport(rows, exps, basis, orderLabel) {
+  const bl = basis === "sin" ? "sin mano de obra" : "incluida la mano de obra";
+  const P = rows.map((r) => ({ r, p: GAS_pick(r, basis) }));
+  const totB = r2(P.reduce((a, x) => a + x.p.budget, 0)), totA = r2(P.reduce((a, x) => a + x.p.actual, 0)), res = r2(totB - totA);
+  const un = GAS_unapproved(rows, exps);
+  const catRows = GAS_CATS.map((c) => {
+    const bud = c.key === "materiales" ? rows.reduce((a, r) => a + r.bMat, 0) : c.key === "transporte" ? rows.reduce((a, r) => a + r.bTr, 0) : c.key === "mano_obra" ? rows.reduce((a, r) => a + r.bLab, 0) : 0;
+    const act = r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0));
+    return [c.label, money(bud), money(act), { v: money(bud - act), color: bud - act < 0 ? "#C1443D" : "#2F7D5B" }];
+  });
+  const sup = {}; exps.forEach((e) => { const k = e.supplier || "—"; sup[k] = (sup[k] || 0) + num(e.amount); });
+  RPT_open({
+    title: "Control de gasto GAM", subtitle: "Presupuesto vs. gasto real por orden de trabajo · " + bl,
+    kpis: [
+      { label: "Presupuesto", value: money(totB) }, { label: "Gasto real", value: money(totA) },
+      { label: res >= 0 ? "Ahorro" : "Excedente", value: money(Math.abs(res)), color: res >= 0 ? "#2F7D5B" : "#C1443D" },
+      { label: "Ejecución", value: (totB ? Math.round((totA / totB) * 100) : 0) + "%" },
+      { label: "Órdenes con excedente", value: String(P.filter((x) => x.p.result < -0.004).length), color: "#C1443D" },
+      { label: "Gastos sin aprobar sobre presupuesto", value: String(un.length) },
+    ],
+    sections: [
+      { heading: "Presupuesto vs. gasto real por orden", svg: RPT_barsSvg(P.map((x) => ({ label: "N.º " + x.r.number + " " + x.r.name, a: x.p.budget, b: x.p.actual, bColor: x.p.result < 0 ? "#C1443D" : "#E8A33D" })), ["Presupuesto", "Gasto real"], (v) => "$" + v.toFixed(0)) },
+      { heading: "Ahorro / excedente por orden", svg: RPT_divergingSvg(P.map((x) => ({ label: "N.º " + x.r.number + " " + x.r.name, value: x.p.result })).sort((a, b) => a.value - b.value), (v) => "$" + v.toFixed(2)) },
+      { heading: "Detalle por orden", table: { head: ["N.º", "Proyecto", "Estado", "Presupuesto", "Gasto real", "Resultado", "Ejec."], align: ["left", "left", "left", "right", "right", "right", "right"],
+        rows: P.map((x) => [x.r.number, x.r.name, OT_estadoMeta(x.r.status).label, money(x.p.budget), money(x.p.actual), { v: (x.p.result < 0 ? "Excedente " : "Ahorro ") + money(Math.abs(x.p.result)), color: x.p.result < 0 ? "#C1443D" : "#2F7D5B" }, x.p.pct + "%"]) } },
+      { heading: "Por categoría (la mano de obra se compara contra su referencia)", table: { head: ["Categoría", "Presupuesto", "Gasto real", "Diferencia"], align: ["left", "right", "right", "right"], rows: catRows } },
+      { heading: "Principales proveedores", table: { head: ["Proveedor", "Total"], align: ["left", "right"], rows: Object.entries(sup).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => [k, money(v)]) } },
+      { heading: "Análisis y recomendaciones", bullets: GAS_recs(rows, exps, basis) },
+    ],
+  });
+}
+
+function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
+  const [f, setF] = useState(initial);
+  const [err, setErr] = useState("");
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const setQtyUnit = (k) => (v) => setF((x) => { const n = { ...x, [k]: v }; if (num(n.qty) > 0 && num(n.unit) > 0) n.amount = String(r2(num(n.qty) * num(n.unit))); return n; });
+  const isLab = f.category === "mano_obra";
+  const order = orders.find((o) => o.id === f.otId);
+  const row = order ? GAS_orderRows([order])[0] : null;
+  const others = expenses.filter((e) => e.otId === f.otId && e.id !== f.id).reduce((a, e) => a + num(e.amount), 0);
+  const after = row ? r2(row.budgetAll - (others + num(f.amount))) : 0;
+  const submit = (e) => {
+    e.preventDefault();
+    if (!f.otId) { setErr("Elige la orden de trabajo a la que pertenece el gasto."); return; }
+    if (!f.concept.trim()) { setErr("Escribe el concepto del gasto."); return; }
+    if (!(num(f.amount) > 0)) { setErr("Ingresa el monto (puede llevar decimales)."); return; }
+    onSave({ ...f, amount: r2(num(f.amount)) });
+  };
+  return (
+    <form onSubmit={submit} className="panel p-5 space-y-4 max-w-3xl">
+      <h3 className="text-sm font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>{initial._new ? "Registrar gasto" : "Editar gasto"}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div><label className="field-label">Orden de trabajo</label>
+          <select className="field" value={f.otId} onChange={set("otId")}>
+            <option value="">— Elige la orden —</option>
+            {orders.filter((o) => o.status !== "anulada").sort((a, b) => num(b.number) - num(a.number)).map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name} · {o.client}</option>)}
+          </select></div>
+        <div><label className="field-label">Fecha del gasto</label><input type="date" className="field" value={f.date} onChange={set("date")} /></div>
+        <div><label className="field-label">Categoría</label>
+          <select className="field" value={f.category} onChange={set("category")}>{GAS_CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
+        <div><label className="field-label">Concepto</label><input className="field" value={f.concept} onChange={set("concept")} placeholder={isLab ? "Ej. Mecanizado de piezas" : "Ej. Plancha de duraluminio"} /></div>
+        <div><label className="field-label">{isLab ? "Trabajador / cuadrilla" : "Proveedor"}</label>
+          <input className="field" value={isLab ? f.worker : f.supplier} onChange={set(isLab ? "worker" : "supplier")} /></div>
+        <div><label className="field-label">N.º de factura / documento</label><input className="field" value={f.document} onChange={set("document")} /></div>
+        <div><label className="field-label">{isLab ? "Horas" : "Cantidad"} (opcional)</label><DecimalInput className="field" value={f.qty} onChange={setQtyUnit("qty")} placeholder="0.00" /></div>
+        <div><label className="field-label">{isLab ? "Tarifa por hora (USD)" : "Costo unitario (USD)"} (opcional)</label><DecimalInput className="field" value={f.unit} onChange={setQtyUnit("unit")} placeholder="0.00" /></div>
+        <div><label className="field-label">Monto total (USD)</label><DecimalInput className="field" value={f.amount} onChange={(v) => setF((x) => ({ ...x, amount: v }))} placeholder="0.00" /></div>
+        <div className="flex items-end"><label className="flex items-center gap-2 text-xs" style={{ color: "var(--text-600)" }}>
+          <input type="checkbox" checked={!!f.approved} onChange={(e) => setF((x) => ({ ...x, approved: e.target.checked }))} />Gasto adicional aprobado previamente (si supera el presupuesto)</label></div>
+      </div>
+      <div><label className="field-label">Notas</label><textarea className="field" rows={2} value={f.notes} onChange={set("notes")} /></div>
+      {row && (
+        <div className="p-3 rounded text-xs space-y-1" style={{ background: "var(--steel-100)", color: "var(--text-600)" }}>
+          <p>Presupuesto de la orden (incl. mano de obra): <strong>{money(row.budgetAll)}</strong> · ya gastado sin este registro: <strong>{money(others)}</strong></p>
+          <p style={{ color: after < 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{after < 0 ? "Con este gasto la orden queda con excedente de " : "Con este gasto la orden queda con saldo de "}{money(Math.abs(after))}</p>
+        </div>
+      )}
+      {err && <p className="text-sm" style={{ color: COLORS.red }}>{err}</p>}
+      <div className="flex gap-2"><button type="submit" className="btn-primary">Guardar gasto</button><button type="button" onClick={onCancel} className="btn-ghost">Cancelar</button></div>
+    </form>
+  );
+}
+
+function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandled }) {
+  const now = new Date();
+  const [tab, setTab] = useState("resumen");
+  const [basis, setBasis] = useState("con");
+  const [fYear, setFYear] = useState("todos");
+  const [fMonth, setFMonth] = useState("todos");
+  const [fOrder, setFOrder] = useState("todos");
+  const [fClient, setFClient] = useState("todos");
+  const [fCat, setFCat] = useState("todos");
+  const [fEstado, setFEstado] = useState("todos");
+  const [q, setQ] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+  const [sort, setSort] = useState({ key: "resultAll", dir: "asc" });
+
+  useEffect(() => { if (focusOrderId) { setFOrder(focusOrderId); setTab("gastos"); onFocusHandled && onFocusHandled(); } }, [focusOrderId]);
+
+  const allRows = useMemo(() => GAS_orderRows(orders), [orders]);
+  const clients = useMemo(() => [...new Set(allRows.map((r) => r.client))].sort(), [allRows]);
+  const years = useMemo(() => [...new Set([String(now.getFullYear()), ...expenses.map((e) => (e.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse(), [expenses]);
+  const orderLabel = (id) => { const o = orders.find((x) => x.id === id); return o ? "N.º " + o.number + " · " + o.name : "(orden eliminada)"; };
+
+  const rows = allRows.filter((r) => (fOrder === "todos" || r.id === fOrder) && (fClient === "todos" || r.client === fClient) && (fEstado === "todos" || r.status === fEstado));
+  const rowIds = new Set(rows.map((r) => r.id));
+  const exps = expenses.filter((e) => rowIds.has(e.otId) &&
+    (fYear === "todos" || (e.date || "").slice(0, 4) === fYear) && (fMonth === "todos" || Number((e.date || "").slice(5, 7)) === Number(fMonth)) &&
+    (fCat === "todos" || e.category === fCat) &&
+    (!q.trim() || ((e.concept || "") + " " + (e.supplier || "") + " " + (e.document || "") + " " + (e.worker || "")).toLowerCase().includes(q.trim().toLowerCase())));
+  const hayFiltros = fYear !== "todos" || fMonth !== "todos" || fOrder !== "todos" || fClient !== "todos" || fCat !== "todos" || fEstado !== "todos" || q;
+  const reset = () => { setFYear("todos"); setFMonth("todos"); setFOrder("todos"); setFClient("todos"); setFCat("todos"); setFEstado("todos"); setQ(""); };
+
+  const P = rows.map((r) => ({ r, p: GAS_pick(r, basis) }));
+  const totB = r2(P.reduce((a, x) => a + x.p.budget, 0)), totA = r2(P.reduce((a, x) => a + x.p.actual, 0)), res = r2(totB - totA);
+  const resEx = r2(rows.reduce((a, r) => a + r.resultEx, 0)), resAll = r2(rows.reduce((a, r) => a + r.resultAll, 0));
+  const gastoPeriodo = r2(exps.reduce((a, e) => a + num(e.amount), 0));
+  const labBud = r2(rows.reduce((a, r) => a + r.bLab, 0)), labAct = r2(rows.reduce((a, r) => a + r.aLab, 0));
+  const exceso = P.filter((x) => x.p.result < -0.004).length;
+  const un = GAS_unapproved(rows, expenses);
+
+  const chartYear = fYear === "todos" ? now.getFullYear() : Number(fYear);
+  const monthData = RES_MESES.map((label, i) => {
+    const vals = {}; let total = 0;
+    exps.filter((e) => (e.date || "").slice(0, 4) === String(chartYear) && Number((e.date || "").slice(5, 7)) === i + 1).forEach((e) => { vals[e.category] = (vals[e.category] || 0) + num(e.amount); total += num(e.amount); });
+    return { label, vals, total: r2(total) };
+  });
+  let cum = 0;
+  const cumPts = monthData.map((d) => { cum += d.total; return { label: d.label, cum: r2(cum) }; });
+  const catBars = GAS_CATS.slice(0, 3).map((c) => ({ label: c.label.replace("Movilización / transporte", "Transporte"), m: c.key,
+    a: r2(rows.reduce((a, r) => a + (c.key === "materiales" ? r.bMat : c.key === "transporte" ? r.bTr : r.bLab), 0)),
+    b: r2(rows.reduce((a, r) => a + (c.key === "materiales" ? r.aMat : c.key === "transporte" ? r.aTr : r.aLab), 0)) }));
+  const grp = (keyFn) => { const m = {}; exps.forEach((e) => { const k = keyFn(e) || "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); };
+  const bySupplier = grp((e) => e.supplier || e.worker);
+  const byCat = GAS_CATS.map((c) => ({ label: c.label, value: r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0)), color: c.color })).filter((x) => x.value > 0);
+  const byClient = (() => { const m = {}; exps.forEach((e) => { const o = allRows.find((r) => r.id === e.otId); const k = o ? o.client : "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
+
+  const startNew = () => setEditing({ _new: true, id: uid(), otId: fOrder !== "todos" ? fOrder : "", date: todayISO(), category: "materiales", concept: "", supplier: "", worker: "", document: "", qty: "", unit: "", amount: "", approved: false, notes: "" });
+  const saveExp = (e) => { const rec = { ...e }; delete rec._new; rec.name = rec.concept; rec.type = rec.category; setExpenses((prev) => (prev.some((x) => x.id === rec.id) ? prev.map((x) => (x.id === rec.id ? rec : x)) : [rec, ...prev])); setEditing(null); setTab("gastos"); };
+  const delExp = (id) => { setExpenses((prev) => prev.filter((x) => x.id !== id)); setConfirmId(null); };
+
+  const Header = (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <SubTabs tabs={[["resumen", "Resumen"], ["gastos", "Gastos"], ["ordenes", "Por orden"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setEditing(null); }} />
+      <button onClick={() => { startNew(); setTab("gastos"); }} className="btn-primary text-xs py-2 px-3 flex items-center gap-1" style={{ display: "inline-flex" }}><Plus size={13} />Registrar gasto</button>
+    </div>
+  );
+  if (editing) return <div className="space-y-6">{Header}<GAS_Form key={editing.id} initial={editing} orders={orders} expenses={expenses} onSave={saveExp} onCancel={() => setEditing(null)} /></div>;
+
+  const Filters = (
+    <Panel>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        <div><label className="field-label">Año (fecha gasto)</label><select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+        <div><label className="field-label">Mes</label><select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+        <div><label className="field-label">Orden de trabajo</label><select className="field" value={fOrder} onChange={(e) => setFOrder(e.target.value)}><option value="todos">Todas</option>{allRows.map((r) => <option key={r.id} value={r.id}>N.º {r.number} · {r.name}</option>)}</select></div>
+        <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+        <div><label className="field-label">Categoría</label><select className="field" value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="todos">Todas</option>{GAS_CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
+        <div><label className="field-label">Estado de la orden</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option>{OT_ESTADOS.filter((s) => s.key !== "anulada").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+        <div><label className="field-label">Resultado</label><select className="field" value={basis} onChange={(e) => setBasis(e.target.value)}><option value="con">Con mano de obra</option><option value="sin">Sin mano de obra</option></select></div>
+        <div><label className="field-label">Buscar</label><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Concepto, proveedor…" /></div>
+      </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+        <p className="text-xs" style={{ color: "var(--text-600)" }}>{rows.length} orden(es) · {exps.length} gasto(s) en el filtro</p>
+        {hayFiltros && <button onClick={reset} className="btn-ghost py-1 px-3 text-xs">Restablecer filtros</button>}
+      </div>
+    </Panel>
+  );
+
+  const resTxt = (v) => (v >= 0 ? "Ahorro" : "Excedente");
+
+  if (tab === "resumen") {
+    return (
+      <div className="space-y-6">
+        {Header}{Filters}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard accent={COLORS.ink}><p className="kpi-number">{money(gastoPeriodo)}</p><p className="kpi-label">Gasto del filtro ({exps.length} registros)</p></KpiCard>
+          <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto de las órdenes {basis === "con" ? "(con mano de obra)" : "(sin mano de obra)"}</p></KpiCard>
+          <KpiCard accent={res < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(res))}</p><p className="kpi-label">{resTxt(res)} acumulado · {totB ? Math.round((totA / totB) * 100) : 0}% ejecutado</p></KpiCard>
+          <KpiCard accent={exceso ? COLORS.red : COLORS.green}><p className="kpi-number">{exceso}</p><p className="kpi-label">Órdenes con excedente</p></KpiCard>
+          <KpiCard accent={resEx < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(resEx))}</p><p className="kpi-label">{resTxt(resEx)} SIN mano de obra</p></KpiCard>
+          <KpiCard accent={resAll < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(resAll))}</p><p className="kpi-label">{resTxt(resAll)} CON mano de obra</p></KpiCard>
+          <KpiCard accent={COLORS.green}><p className="kpi-number">{money(labAct)}</p><p className="kpi-label">Mano de obra real · referencia {money(labBud)}</p></KpiCard>
+          <KpiCard accent={un.length ? COLORS.amber : COLORS.green}><p className="kpi-number">{un.length}</p><p className="kpi-label">Gastos sobre presupuesto sin aprobar</p></KpiCard>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel><PanelHeader title="Gasto mensual por categoría" /><GAS_StackedBars data={monthData} year={chartYear} /></Panel>
+          <Panel><PanelHeader title="Gasto acumulado vs. presupuesto" /><GAS_CumLine points={cumPts} budget={totB} year={chartYear} /></Panel>
+        </div>
+        <Panel><PanelHeader title="Presupuesto vs. gasto real por orden (clic para ver sus gastos)" /><GAS_OrderBars rows={rows} basis={basis} onPick={(id) => { setFOrder(id); setTab("gastos"); }} /></Panel>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel><PanelHeader title="Ahorro / excedente por orden" /><GAS_Diverging rows={rows} basis={basis} /></Panel>
+          <Panel><PanelHeader title="Presupuesto vs. real por categoría" /><OT_GroupedBars data={catBars} colors={[COLORS.steel, COLORS.amber]} names={["Presupuesto", "Gasto real"]} fmt={(v) => "$" + Math.round(v)} /></Panel>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Panel><PanelHeader title="Gasto por categoría" /><OT_HBars items={byCat} fmt={money} /></Panel>
+          <Panel><PanelHeader title="Principales proveedores / personal" /><OT_HBars items={bySupplier} fmt={money} color={COLORS.ink} /></Panel>
+          <Panel><PanelHeader title="Gasto por cliente" /><OT_HBars items={byClient} fmt={money} color={COLORS.green} /></Panel>
+        </div>
+        <Panel><PanelHeader title="Análisis y recomendaciones" /><ul className="space-y-2 text-sm" style={{ color: "var(--text-900)" }}>{GAS_recs(rows, exps, basis).map((t, i) => <li key={i}>· {t}</li>)}</ul></Panel>
+      </div>
+    );
+  }
+
+  if (tab === "gastos") {
+    const list = [...exps].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return (
+      <div className="space-y-6">
+        {Header}{Filters}
+        <Panel>
+          {list.length ? (
+            <div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Fecha</th><th className="font-medium pb-2 pr-3">Orden</th><th className="font-medium pb-2 pr-3">Categoría</th><th className="font-medium pb-2 pr-3">Concepto</th><th className="font-medium pb-2 pr-3">Proveedor / personal</th><th className="font-medium pb-2 pr-3">Doc.</th><th className="font-medium pb-2 pr-3 text-right">Monto</th><th /></tr></thead>
+              <tbody>
+                {list.map((e) => {
+                  const c = GAS_catMeta(e.category);
+                  return (
+                    <tr key={e.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                      <td className="py-2 pr-3 whitespace-nowrap">{fdate(e.date)}</td>
+                      <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{orderLabel(e.otId)}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: c.color, marginRight: 6 }} />{c.label}</td>
+                      <td className="py-2 pr-3" style={{ color: "var(--text-900)" }}>{e.concept}{e.approved ? <span className="risk-pill" style={{ background: "var(--green-soft)", color: COLORS.green, marginLeft: 6 }}>aprobado</span> : null}</td>
+                      <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{e.supplier || e.worker || "—"}</td>
+                      <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{e.document || "—"}</td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap font-medium">{money(num(e.amount))}</td>
+                      <td className="py-2 whitespace-nowrap text-right">
+                        {confirmId === e.id ? (<span><button className="text-xs mr-2" style={{ color: COLORS.red }} onClick={() => delExp(e.id)}>Eliminar</button><button className="text-xs" style={{ color: "var(--text-400)" }} onClick={() => setConfirmId(null)}>Cancelar</button></span>) : (
+                          <span className="flex items-center gap-3 justify-end"><button aria-label="Editar" onClick={() => setEditing({ ...e })} style={{ color: "var(--text-400)" }}><Pencil size={14} /></button><button aria-label="Eliminar" onClick={() => setConfirmId(e.id)} style={{ color: "var(--text-400)" }}><Trash2 size={14} /></button></span>)}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ borderTop: "2px solid var(--steel-200)" }}><td colSpan={6} className="py-2 pr-3 text-right font-semibold">Total del filtro</td><td className="py-2 pr-3 text-right font-semibold">{money(gastoPeriodo)}</td><td /></tr>
+              </tbody></table></div>
+          ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>{expenses.length ? "No hay gastos con estos filtros." : "Aún no hay gastos. Registra el primero con «Registrar gasto»."}</p>}
+        </Panel>
+      </div>
+    );
+  }
+
+  if (tab === "ordenes") {
+    const sortedRows = [...rows].sort((a, b) => { const av = a[sort.key], bv = b[sort.key]; const c = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv), "es"); return sort.dir === "asc" ? c : -c; });
+    const sk = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+    const Th = ({ k, children, right }) => <th className="font-medium pb-2 pr-3 cursor-pointer select-none whitespace-nowrap" style={{ textAlign: right ? "right" : "left" }} onClick={() => sk(k)}>{children}{sort.key === k ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}</th>;
+    const cell = (v) => <span style={{ color: v < -0.004 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{v < 0 ? "−" : "+"}{money(Math.abs(v))}</span>;
+    return (
+      <div className="space-y-6">
+        {Header}{Filters}
+        <Panel>
+          <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Seguimiento presupuestario por orden. <strong style={{ color: COLORS.green }}>+ ahorro</strong> · <strong style={{ color: COLORS.red }}>− excedente</strong>. «Sin MO» compara solo materiales y transporte; «Con MO» incluye la mano de obra.</p>
+          {sortedRows.length ? (
+            <div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
+                <Th k="number">N.º</Th><Th k="name">Proyecto</Th><Th k="status">Estado</Th><Th k="budgetEx" right>Pres. sin MO</Th><Th k="actualEx" right>Real sin MO</Th><Th k="resultEx" right>Resultado sin MO</Th>
+                <Th k="bLab" right>MO ref.</Th><Th k="aLab" right>MO real</Th><Th k="budgetAll" right>Pres. con MO</Th><Th k="actualAll" right>Real con MO</Th><Th k="resultAll" right>Resultado con MO</Th><Th k="pctAll" right>Ejec.</Th>
+              </tr></thead>
+              <tbody>
+                {sortedRows.map((r) => (
+                  <tr key={r.id} className="cursor-pointer" style={{ borderTop: "1px solid var(--steel-100)" }} onClick={() => { setFOrder(r.id); setTab("gastos"); }}>
+                    <td className="py-2 pr-3 font-medium">{r.number}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-900)" }}>{r.name}<div className="text-xs" style={{ color: "var(--text-400)" }}>{r.client}</div></td>
+                    <td className="py-2 pr-3 whitespace-nowrap"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: OT_estadoMeta(r.status).color, marginRight: 6 }} />{OT_estadoMeta(r.status).label}</td>
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budgetEx)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.actualEx)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{cell(r.resultEx)}</td>
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.bLab)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.aLab)}</td>
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budgetAll)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.actualAll)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{cell(r.resultAll)}</td>
+                    <td className="py-2 pr-3 text-right" style={{ color: r.pctAll > 100 ? COLORS.red : "var(--text-900)" }}>{r.pctAll}%</td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: "2px solid var(--steel-200)" }}>
+                  <td colSpan={3} className="py-2 pr-3 text-right font-semibold">Totales</td>
+                  <td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.budgetEx, 0))}</td><td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.actualEx, 0))}</td><td className="py-2 pr-3 text-right">{cell(resEx)}</td>
+                  <td className="py-2 pr-3 text-right font-semibold">{money(labBud)}</td><td className="py-2 pr-3 text-right font-semibold">{money(labAct)}</td>
+                  <td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.budgetAll, 0))}</td><td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.actualAll, 0))}</td><td className="py-2 pr-3 text-right">{cell(resAll)}</td><td />
+                </tr>
+              </tbody></table></div>
+          ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>No hay órdenes con estos filtros.</p>}
+        </Panel>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {Header}{Filters}
+      <Panel>
+        <PanelHeader title="Informe gerencial" />
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Informe listo para imprimir o guardar como PDF: indicadores, gráficos de presupuesto vs. real, ahorro/excedente por orden, categorías, proveedores y recomendaciones (según los filtros actuales).</p>
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={() => GAS_openReport(rows, exps, basis, orderLabel)} className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }}><Printer size={14} />Informe gerencial (PDF)</button>
+          <button onClick={() => GAS_exportExcel(rows, exps, orderLabel)} className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }}><Download size={14} />Excel de respaldo</button>
+        </div>
+      </Panel>
+      <Panel><PanelHeader title="Análisis y recomendaciones" /><ul className="space-y-2 text-sm" style={{ color: "var(--text-900)" }}>{GAS_recs(rows, exps, basis).map((t, i) => <li key={i}>· {t}</li>)}</ul></Panel>
     </div>
   );
 }
@@ -4461,11 +5112,14 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
   const otAbiertas = otRows.filter((r) => !r.terminal).length;
   const otAtras = otRows.filter((r) => r.late);
   const otSobre = otRows.filter((r) => r.over);
+  const gasRows = GAS_orderRows(otOrders || []);
+  const gasRes = r2(gasRows.reduce((a, r) => a + r.resultAll, 0));
+  const gasTot = r2(gasRows.reduce((a, r) => a + r.actualAll, 0));
   const otPres = r2(otRows.reduce((a, r) => a + r.budget, 0));
   const otEjec = r2(otRows.reduce((a, r) => a + r.actual, 0));
   otAtras.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" atrasada respecto a su fecha de entrega.` }));
   otSobre.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" supera su presupuesto en ${money(r.variance)}.` }));
-  const SECTIONS = [["proyectos", "Control de proyectos"], ["calendario", "Calendario"], ["materiales", "Planos y materiales"], ["actas", "Actas y órdenes"], ["ordenes", "Órdenes de trabajo"], ["caja", "Caja chica"]];
+  const SECTIONS = [["proyectos", "Control de proyectos"], ["calendario", "Calendario"], ["materiales", "Planos y materiales"], ["actas", "Actas y órdenes"], ["ordenes", "Órdenes de trabajo"], ["gastos", "Control de gasto GAM"], ["caja", "Caja chica"]];
 
   const Th = ({ k, children, right }) => (
     <th className="font-medium pb-2 pr-3 cursor-pointer select-none whitespace-nowrap" style={{ textAlign: right ? "right" : "left" }} onClick={() => setSortKey(k)}>
@@ -4636,7 +5290,12 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
         )}
       </Panel>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <KpiCard accent={gasRes < 0 ? COLORS.red : COLORS.green}>
+          <p className="kpi-number">{money(Math.abs(gasRes))}</p>
+          <p className="kpi-label">{gasRes < 0 ? "Excedente" : "Ahorro"} en órdenes (incl. mano de obra)</p>
+          <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>Gasto registrado {money(gasTot)}</p>
+        </KpiCard>
         <KpiCard accent={otAtras.length || otSobre.length ? COLORS.red : COLORS.green}>
           <p className="kpi-number">{otAbiertas}</p>
           <p className="kpi-label">Órdenes de trabajo abiertas · {otAtras.length} atrasada(s) · {otSobre.length} sobre presupuesto</p>
@@ -4671,7 +5330,7 @@ function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, c
         )}
       </Panel>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {SECTIONS.map(([key, label]) => (
           <button key={key} onClick={() => goTo(key)} className="panel text-left p-4" style={{ cursor: "pointer" }}>
             <p className="text-sm font-medium" style={{ color: "var(--text-900)" }}>{label}</p>
@@ -4693,6 +5352,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["materiales", "Planos y materiales"],
     ["actas", "Actas y órdenes"],
     ["ordenes", "Órdenes de trabajo"],
+    ["gastos", "Control de gasto GAM"],
     ["caja", "Caja chica"],
   ];
   return (
@@ -4743,6 +5403,7 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusProjectId, setFocusProjectId] = useState(null);
   const [otNewRequest, setOtNewRequest] = useState(false);
+  const [gasFocus, setGasFocus] = useState(null);
 
   const proyectosSync = useDatasetSync("Proyectos", [], (arr) => arr, (state) => state);
   const calSync = useDatasetSync("Calendario", { items: [], risks: [] },
@@ -4759,11 +5420,12 @@ function App() {
     (state) => [{ id: "caja-chica", name: "Caja chica", client: "", type: "", funds: state.funds, expenses: state.expenses }]);
 
   const otSync = useDatasetSync("OrdenesTrabajo", [], (arr) => arr, (state) => state.map((o) => ({ ...o, type: "Orden de trabajo" })));
+  const gasSync = useDatasetSync("GastosOT", [], (arr) => arr, (state) => state.map((e) => ({ ...e, name: e.concept || "Gasto", type: e.category })));
 
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload();
+        proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -4771,8 +5433,8 @@ function App() {
     // eslint-disable-next-line
   }, []);
 
-  const allLoaded = proyectosSync.loaded && calSync.loaded && matSync.loaded && actSync.loaded && cajaSync.loaded && otSync.loaded;
-  const anyNeedsSetup = proyectosSync.needsSetup || calSync.needsSetup || matSync.needsSetup || actSync.needsSetup || cajaSync.needsSetup || otSync.needsSetup;
+  const allLoaded = proyectosSync.loaded && calSync.loaded && matSync.loaded && actSync.loaded && cajaSync.loaded && otSync.loaded && gasSync.loaded;
+  const anyNeedsSetup = proyectosSync.needsSetup || calSync.needsSetup || matSync.needsSetup || actSync.needsSetup || cajaSync.needsSetup || otSync.needsSetup || gasSync.needsSetup;
 
   if (!allLoaded) {
     return <div className="w-full h-full flex items-center justify-center" style={{ color: "var(--text-400)", fontFamily: "var(--font-body)" }}>Cargando…</div>;
@@ -4789,17 +5451,22 @@ function App() {
         <SetupScreen
           initial={getSyncConfig()}
           onCancel={showSettings ? () => setShowSettings(false) : null}
-          onSave={() => { setShowSettings(false); proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); }}
+          onSave={() => { setShowSettings(false); proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload(); }}
         />
       </div>
     );
   }
 
+  const otEnriched = OT_withExpenses(otSync.state, gasSync.state);
+  const setGastos = (updater) => gasSync.setState((prev) => (typeof updater === "function" ? updater(prev) : updater));
+  const goGastos = (id) => { setGasFocus(id); setSection("gastos"); };
   const goNewOrder = () => { setOtNewRequest(true); setSection("ordenes"); };
   const calStatusOf = (st) => (st === "en_ejecucion" ? "en_curso" : st === "entregada" || st === "cerrada" ? "completado" : "planificado");
 
   const saveOrder = (o) => {
     const order = { ...o };
+    if (order._exp) { const raw = otSync.state.find((x) => x.id === order.id) || {}; ["actualMaterials", "actualTransport", "actualLabor", "actualOthers"].forEach((k) => { order[k] = raw[k] === undefined ? "" : raw[k]; }); }
+    delete order._exp; delete order._expCount;
     const live = order.status !== "borrador" && order.status !== "anulada" && order.plannedStart && order.plannedEnd;
     if (live) {
       const start = order.plannedStart, end = order.plannedEnd;
@@ -4889,10 +5556,10 @@ function App() {
   const setOtOrders = (updater) => otSync.setState((prev) => (typeof updater === "function" ? updater(prev) : updater));
 
   const syncStatus = {
-    error: proyectosSync.syncError || calSync.syncError || matSync.syncError || actSync.syncError || cajaSync.syncError || otSync.syncError,
-    last: [proyectosSync.lastSynced, calSync.lastSynced, matSync.lastSynced, actSync.lastSynced, cajaSync.lastSynced, otSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
+    error: proyectosSync.syncError || calSync.syncError || matSync.syncError || actSync.syncError || cajaSync.syncError || otSync.syncError || gasSync.syncError,
+    last: [proyectosSync.lastSynced, calSync.lastSynced, matSync.lastSynced, actSync.lastSynced, cajaSync.lastSynced, otSync.lastSynced, gasSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
   };
-  const refreshAll = () => { proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); };
+  const refreshAll = () => { proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload(); };
 
   return (
     <div className="app-shell">
@@ -4950,7 +5617,7 @@ function App() {
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-8">
             {section === "resumen" ? (
-              <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} otOrders={otSync.state} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
+              <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} otOrders={otEnriched} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
             ) : section === "proyectos" ? (
               <CP_Module onNewProject={goNewOrder} focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
             ) : section === "calendario" ? (
@@ -4959,8 +5626,10 @@ function App() {
               <MAT_Module projects={matSync.state.projects} updateProject={updateMatProject} createProject={createMatProject} deleteProject={deleteMatProject} visits={matSync.state.visits} setVisits={setMatVisits} cpProjects={proyectosSync.state} />
             ) : section === "actas" ? (
               <ACT_Module docs={actSync.state.docs} setDocs={setActDocs} cpProjects={proyectosSync.state} />
+            ) : section === "gastos" ? (
+              <GAS_Module orders={otEnriched} expenses={gasSync.state} setExpenses={setGastos} focusOrderId={gasFocus} onFocusHandled={() => setGasFocus(null)} />
             ) : section === "ordenes" ? (
-              <OT_Module orders={otSync.state} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} cpProjects={proyectosSync.state} />
+              <OT_Module onOpenGastos={goGastos} orders={otEnriched} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} cpProjects={proyectosSync.state} />
             ) : (
               <CAJA_Module funds={cajaSync.state.funds} setFunds={setCajaFunds} expenses={cajaSync.state.expenses} setExpenses={setCajaExpenses} cpProjects={proyectosSync.state} />
             )}
