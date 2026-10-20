@@ -25,6 +25,7 @@
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script type="text/babel" data-presets="react">
 
+
 /* ===== NUCLEO COMPARTIDO ===== */
 const { useState, useEffect, useMemo, useCallback, Fragment, useRef } = React;
 
@@ -2654,7 +2655,7 @@ function MAT_ReportingTab({ projects, visits }) {
   );
 }
 
-function MAT_Module({ projects, updateProject, createProject, deleteProject, visits, setVisits, cpProjects }) {
+function MAT_Module({ projects, updateProject, createProject, deleteProject, visits, setVisits, cpProjects, onNewOT }) {
   const [selectedId, setSelectedId] = useState(projects[0] ? projects[0].id : null);
   const [tab, setTab] = useState("proyecto");
   const [view, setView] = useState("detail");
@@ -2694,14 +2695,14 @@ function MAT_Module({ projects, updateProject, createProject, deleteProject, vis
       {tab === "proyecto" ? (
         <div className="space-y-6">
           <ModulePicker items={projects.map((p) => ({ id: p.id, name: p.name, sub: p.client }))} selectedId={selectedId}
-            onSelect={(id) => { setSelectedId(id); setView("detail"); }} onNew={() => setView("new")} onDelete={handleDelete} newLabel="Nuevo proyecto" />
+            onSelect={(id) => { setSelectedId(id); setView("detail"); }} onNew={() => (onNewOT ? onNewOT() : setView("new"))} onDelete={handleDelete} newLabel="Nueva orden de trabajo" />
           {view === "new" ? (
             <MAT_NewProjectForm onCreate={handleCreate} onCancel={() => project && setView("detail")} cpProjects={cpProjects} />
           ) : project ? (
             <MAT_ProjectDetail project={project} onUpdate={updateSelected} visits={visits} />
           ) : (
             <div className="max-w-lg mx-auto py-16 text-center">
-              <p className="text-sm" style={{ color: "var(--text-400)" }}>Crea tu primer proyecto para empezar a subir planos y materiales.</p>
+              <p className="text-sm" style={{ color: "var(--text-400)" }}>Crea una orden de trabajo: de ahí nace el proyecto para subir planos y materiales.</p>
             </div>
           )}
         </div>
@@ -2866,7 +2867,7 @@ function ACT_ItemsEditor({ items, onChange }) {
 
 /* ---------------------------------- detalle / edicion del documento ---------------------------------- */
 
-function ACT_DocumentDetail({ doc, onUpdate, onDelete, onBack, cpProjects }) {
+function ACT_DocumentDetail({ doc, onUpdate, onDelete, onBack, cpProjects, orders }) {
   const clientNames = Array.from(new Set((cpProjects || []).map((p) => p.client).filter(Boolean)));
   const meta = ACT_DOC_TYPE_META[doc.docType];
   return (
@@ -2890,6 +2891,10 @@ function ACT_DocumentDetail({ doc, onUpdate, onDelete, onBack, cpProjects }) {
       <Panel className="no-print">
         <PanelHeader title="Datos del documento" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2"><label className="field-label">Orden de trabajo vinculada (estado: {doc.otStatus ? OT_estadoMeta(doc.otStatus).label : "sin orden"})</label>
+            <select className="field" value={doc.otId || ""} onChange={(e) => { const o = (orders || []).find((x) => x.id === e.target.value); onUpdate(o ? { otId: o.id, otNumber: o.number, otStatus: OT_normStatus(o.status), client: doc.client || o.client || "", responsible: doc.responsible || o.coordinator || "", startDate: doc.startDate || o.plannedStart || "", endDate: doc.endDate || o.plannedEnd || "" } : { otId: "", otNumber: "", otStatus: "" }); }}>
+              <option value="">— Sin vincular —</option>{(orders || []).filter((o) => o.status !== "anulada").map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name} · {o.client}</option>)}
+            </select></div>
           <div><label className="field-label">Cliente</label><input list="clientes-act" className="field" value={doc.client} onChange={(e) => onUpdate({ client: e.target.value })} /><datalist id="clientes-act">{clientNames.map((c) => <option key={c} value={c} />)}</datalist></div>
           <div><label className="field-label">Contacto del cliente</label><input className="field" value={doc.clientContact || ""} onChange={(e) => onUpdate({ clientContact: e.target.value })} /></div>
           <div>
@@ -2944,21 +2949,15 @@ function ACT_DocumentsList({ docs, onSelect, onCreate, onDelete }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>Documentos</h2>
-          <p className="text-sm" style={{ color: "var(--text-600)" }}>Actas de entrega y órdenes de trabajo</p>
+          <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>Actas de entrega</h2>
+          <p className="text-sm" style={{ color: "var(--text-600)" }}>Actas de entrega · se crean solas desde cada orden de trabajo (también puedes crear una manual)</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => onCreate("acta")} className="btn-primary text-xs py-2 px-3"><Plus size={13} className="inline -mt-0.5 mr-1" />Acta de entrega</button>
-          <button onClick={() => onCreate("orden")} className="btn-ghost text-xs py-2 px-3"><Plus size={13} className="inline -mt-0.5 mr-1" />Orden de trabajo</button>
+          <button onClick={() => onCreate("acta")} className="btn-primary text-xs py-2 px-3"><Plus size={13} className="inline -mt-0.5 mr-1" />Nueva acta</button>
         </div>
       </div>
       <Panel>
         <div className="flex flex-wrap gap-2 mb-4">
-          <select className="field" style={{ width: 170 }} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-            <option value="">Todos los tipos</option>
-            <option value="acta">Actas de entrega</option>
-            <option value="orden">Órdenes de trabajo</option>
-          </select>
           <select className="field" style={{ width: 180 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
             <option value="">Todos los clientes</option>
             {clients.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -2973,13 +2972,13 @@ function ACT_DocumentsList({ docs, onSelect, onCreate, onDelete }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left" style={{ color: "var(--text-400)" }}>
-              <th className="font-medium pb-2">N.º</th><th className="font-medium pb-2">Tipo</th><th className="font-medium pb-2">Cliente</th><th className="font-medium pb-2">Trabajo</th><th className="font-medium pb-2">Fecha</th><th className="font-medium pb-2">Estado</th><th></th>
+              <th className="font-medium pb-2">N.º</th><th className="font-medium pb-2">Orden / estado</th><th className="font-medium pb-2">Cliente</th><th className="font-medium pb-2">Trabajo</th><th className="font-medium pb-2">Fecha</th><th className="font-medium pb-2">Estado</th><th></th>
             </tr></thead>
             <tbody>
               {filtered.map((d) => (
                 <tr key={d.id} style={{ borderTop: "1px solid var(--steel-100)", cursor: "pointer" }} onClick={() => onSelect(d.id)}>
                   <td className="py-1.5 pr-2" style={{ color: "var(--text-900)" }}>{d.number}</td>
-                  <td className="py-1.5 pr-2"><span className="risk-pill" style={{ background: d.docType === "acta" ? COLORS.green + "22" : COLORS.steel + "22", color: d.docType === "acta" ? COLORS.green : COLORS.steel }}>{ACT_DOC_TYPE_META[d.docType].label}</span></td>
+                  <td className="py-1.5 pr-2">{d.otId ? <span className="risk-pill" style={{ background: OT_estadoMeta(d.otStatus).color + "22", color: OT_estadoMeta(d.otStatus).color, fontWeight: 700 }}>OT {d.otNumber} · {OT_estadoMeta(d.otStatus).label}</span> : <span className="text-xs" style={{ color: "var(--text-400)" }}>Manual</span>}</td>
                   <td className="py-1.5 pr-2" style={{ color: "var(--text-600)" }}>{d.client || "—"}</td>
                   <td className="py-1.5 pr-2" style={{ color: "var(--text-600)" }}>{d.workType || "—"}</td>
                   <td className="py-1.5 pr-2" style={{ color: "var(--text-600)" }}>{d.date ? fdate(d.date) : "—"}</td>
@@ -3124,15 +3123,17 @@ function ACT_ReportingTab({ docs }) {
   );
 }
 
-function ACT_Module({ docs, setDocs, cpProjects }) {
+function ACT_Module({ docs: allDocs, setDocs, cpProjects, orders }) {
+  const docs = allDocs.filter((d) => d.docType !== "orden"); // las órdenes de trabajo ahora se gestionan en su propio módulo
   const [tab, setTab] = useState("documentos");
   const [selectedId, setSelectedId] = useState(null);
 
   const selectedDoc = docs.find((d) => d.id === selectedId) || null;
 
-  const createDoc = (docType) => {
+  const createDoc = () => {
+    const docType = "acta";
     const nd = {
-      id: uid(), docType, number: ACT_nextNumber(docs, docType),
+      id: uid(), docType, number: ACT_nextNumber(allDocs, docType),
       client: "", clientContact: "", workType: "", responsible: "",
       date: todayISO(), startDate: "", endDate: "",
       description: "", items: [], observations: "", internalNotes: "",
@@ -3155,7 +3156,7 @@ function ACT_Module({ docs, setDocs, cpProjects }) {
       {tab === "reportes" ? (
         <ACT_ReportingTab docs={docs} />
       ) : selectedDoc ? (
-        <ACT_DocumentDetail doc={selectedDoc} onUpdate={updateDoc} onDelete={() => deleteDoc(selectedDoc.id)} onBack={() => setSelectedId(null)} cpProjects={cpProjects} />
+        <ACT_DocumentDetail doc={selectedDoc} onUpdate={updateDoc} onDelete={() => deleteDoc(selectedDoc.id)} onBack={() => setSelectedId(null)} cpProjects={cpProjects} orders={orders} />
       ) : (
         <ACT_DocumentsList docs={docs} onSelect={setSelectedId} onCreate={createDoc} onDelete={deleteDoc} />
       )}
@@ -3618,15 +3619,15 @@ function CAJA_Module({ funds, setFunds, expenses, setExpenses, cpProjects }) {
 /* ===== MODULO: ORDENES DE TRABAJO ===== */
 
 const OT_ESTADOS = [
-  { key: "borrador", label: "Borrador", color: "#8797A6" },
-  { key: "emitida", label: "Emitida", color: COLORS.steel },
-  { key: "en_ejecucion", label: "En ejecución", color: COLORS.amber },
-  { key: "entregada", label: "Entregada", color: COLORS.green },
-  { key: "cerrada", label: "Cerrada", color: COLORS.ink },
-  { key: "anulada", label: "Anulada", color: COLORS.red },
+  { key: "planificado", label: "Planificado", color: "#2563EB" },
+  { key: "en_curso", label: "En curso", color: "#F59E0B" },
+  { key: "terminado", label: "Terminado", color: "#16A34A" },
+  { key: "anulada", label: "Anulada", color: "#EF4444" },
 ];
-const OT_TERMINAL = ["entregada", "cerrada", "anulada"];
-const OT_estadoMeta = (k) => OT_ESTADOS.find((e) => e.key === k) || OT_ESTADOS[0];
+const OT_TERMINAL = ["terminado", "anulada"];
+// compatibilidad con estados antiguos (no se pierde información ya guardada)
+const OT_normStatus = (k) => ({ borrador: "planificado", emitida: "planificado", en_ejecucion: "en_curso", entregada: "terminado", cerrada: "terminado" }[k] || (OT_ESTADOS.some((e) => e.key === k) ? k : "planificado"));
+const OT_estadoMeta = (k) => OT_ESTADOS.find((e) => e.key === OT_normStatus(k)) || OT_ESTADOS[0];
 const num = (v) => { const n = parseFloat(String(v === undefined || v === null ? "" : v).replace(",", ".")); return isNaN(n) ? 0 : n; };
 const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -3651,14 +3652,13 @@ function OT_addWorkdays(startISO, n) {
 }
 
 function OT_calc(o) {
-  const refLab = o.laborIsReference !== false;
-  const budget = r2(num(o.budgetMaterials) + num(o.budgetTransport) + (refLab ? 0 : num(o.budgetLabor)));
-  const actual = r2(num(o.actualMaterials) + num(o.actualTransport) + num(o.actualOthers) + (refLab ? 0 : num(o.actualLabor)));
-  const budgetAll = r2(num(o.budgetMaterials) + num(o.budgetTransport) + num(o.budgetLabor));
-  const actualAll = r2(num(o.actualMaterials) + num(o.actualTransport) + num(o.actualOthers) + num(o.actualLabor));
+  // Regla de gestión: solo se suman Materiales y Transporte. Mano de obra y "otros" son solo dato informativo.
+  const budget = r2(num(o.budgetMaterials) + num(o.budgetTransport));
+  const actual = r2(num(o.actualMaterials) + num(o.actualTransport));
+  const budgetAll = budget, actualAll = actual;
   const variance = r2(actual - budget);
   const execPct = budget > 0 ? Math.round((actual / budget) * 100) : 0;
-  const status = o.status || "borrador";
+  const status = OT_normStatus(o.status);
   const terminal = OT_TERMINAL.includes(status);
   const today = todayISO();
   const late = !terminal && !!o.plannedEnd && o.plannedEnd < today;
@@ -3666,12 +3666,12 @@ function OT_calc(o) {
   const endReal = o.realEnd || "";
   const workdays = OT_workdays(o.realStart || o.plannedStart, endReal || (terminal ? "" : today));
   let onTime = null;
-  if ((status === "entregada" || status === "cerrada") && endReal) {
+  if (status === "terminado" && endReal) {
     if (o.plannedEnd) onTime = endReal <= o.plannedEnd;
     else if (num(o.authorizedDays) > 0 && o.realStart) onTime = OT_workdays(o.realStart, endReal) <= num(o.authorizedDays);
   }
   const level = over || (late && daysBetween(o.plannedEnd, today) > 7) ? "rojo" : late || (budget > 0 && actual > budget * 0.9) ? "amarillo" : "verde";
-  return { budget, actual, variance, execPct, status, terminal, late, over, onTime, level, workdays, labor: num(o.budgetLabor), budgetAll, actualAll };
+  return { budget, actual, variance, execPct, status, terminal, late, over, onTime, level, workdays, labor: num(o.budgetLabor), laborReal: num(o.actualLabor), others: num(o.actualOthers), budgetAll, actualAll };
 }
 
 function OT_buildRows(orders) {
@@ -3686,10 +3686,10 @@ function OT_blank(orders) {
   const max = orders.reduce((m, o) => Math.max(m, num(o.number)), 0);
   return {
     id: uid(), number: max + 1, issueDate: todayISO(), projectId: "", calItemId: "", resource: "", name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "",
-    budgetMaterials: "", budgetTransport: "", budgetLabor: "", laborIsReference: true,
+    budgetMaterials: "", budgetTransport: "", budgetLabor: "",
     actualMaterials: "", actualTransport: "", actualLabor: "",
     plannedStart: todayISO(), plannedEnd: "", authorizedDays: "", realStart: "", realEnd: "", staff: "", notes: "",
-    authorizedBy: "", receivedBy: "", receivedDate: "", status: "emitida", progress: 0,
+    authorizedBy: "", receivedBy: "", receivedDate: "", status: "planificado", progress: 0, matId: "", actId: "",
   };
 }
 
@@ -3772,8 +3772,8 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     if (!f.name.trim()) return;
-    if (f.status !== "borrador" && f.status !== "anulada") {
-      if (!f.plannedStart || !f.plannedEnd) { setErr("Indica la fecha de inicio y la duración (días laborables) o la fecha de entrega: de ahí salen el proyecto y el calendario."); return; }
+    if (f.status !== "anulada") {
+      if (!f.plannedStart || !f.plannedEnd) { setErr("Indica la fecha de inicio y la duración (días laborables) o la fecha de entrega: de ahí salen el proyecto, los planos y materiales y el acta."); return; }
       if (f.plannedEnd < f.plannedStart) { setErr("La fecha de entrega no puede ser anterior a la de inicio."); return; }
     }
     setErr("");
@@ -3795,8 +3795,8 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
       <div className="panel p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
         <div><label className="field-label">N.º de orden</label><input type="number" min="1" className="field" value={f.number} onChange={set("number")} /></div>
         <div><label className="field-label">Fecha de emisión</label><input type="date" className="field" value={f.issueDate} onChange={set("issueDate")} /></div>
-        <div><label className="field-label">Estado</label>
-          <select className="field" value={f.status} onChange={set("status")}>{OT_ESTADOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+        <div><label className="field-label">Estado del trabajo (se replica en todos los módulos)</label>
+          <select className="field" value={OT_normStatus(f.status)} onChange={(e) => { const v = e.target.value; setF((x) => ({ ...x, status: v, ...(v === "terminado" ? { progress: 100, realEnd: x.realEnd || todayISO(), realStart: x.realStart || x.plannedStart } : {}), ...(v === "en_curso" ? { realStart: x.realStart || todayISO() } : {}) })); }} style={{ borderColor: OT_estadoMeta(f.status).color, borderWidth: 2, fontWeight: 600 }}>{OT_ESTADOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
         <div><label className="field-label">Avance (%)</label><DecimalInput className="field" value={f.progress} onChange={setV("progress")} placeholder="0" /></div>
       </div>
 
@@ -3823,14 +3823,11 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div><label className="field-label">Materiales</label><DecimalInput className="field" value={f.budgetMaterials} onChange={setV("budgetMaterials")} placeholder="0.00" /></div>
           <div><label className="field-label">Movilización / transporte</label><DecimalInput className="field" value={f.budgetTransport} onChange={setV("budgetTransport")} placeholder="0.00" /></div>
-          <div><label className="field-label">Mano de obra{f.laborIsReference !== false ? " (referencia)" : ""}</label><DecimalInput className="field" value={f.budgetLabor} onChange={setV("budgetLabor")} placeholder="0.00" /></div>
+          <div><label className="field-label">Mano de obra (solo dato, no se suma)</label><DecimalInput className="field" value={f.budgetLabor} onChange={setV("budgetLabor")} placeholder="0.00" /></div>
         </div>
-        <label className="flex items-center gap-2 text-xs mt-3" style={{ color: "var(--text-600)" }}>
-          <input type="checkbox" checked={f.laborIsReference !== false} onChange={(e) => setF((x) => ({ ...x, laborIsReference: e.target.checked }))} />
-          La mano de obra es solo referencia (no se suma al total presupuestado)
-        </label>
+        <p className="text-xs mt-3" style={{ color: "var(--text-600)" }}>El total presupuestado y el análisis de gasto suman <strong>solo Materiales + Transporte</strong>. La mano de obra queda como dato de referencia.</p>
         <div className="mt-4 p-3 rounded flex items-center justify-between" style={{ background: "var(--steel-100)" }}>
-          <span className="text-sm font-semibold" style={{ color: "var(--text-900)" }}>TOTAL PRESUPUESTADO</span>
+          <span className="text-sm font-semibold" style={{ color: "var(--text-900)" }}>TOTAL PRESUPUESTADO (Materiales + Transporte)</span>
           <span className="text-lg font-semibold" style={{ fontFamily: "var(--font-display)", color: COLORS.ink }}>{money(c.budget)}</span>
         </div>
         <p className="text-xs font-semibold mt-5 mb-2" style={{ color: "var(--text-600)" }}>Gasto real ejecutado (control)</p>
@@ -3843,8 +3840,8 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div><label className="field-label">Materiales (real)</label><DecimalInput className="field" value={f.actualMaterials} onChange={setV("actualMaterials")} placeholder="0.00" /></div>
             <div><label className="field-label">Movilización (real)</label><DecimalInput className="field" value={f.actualTransport} onChange={setV("actualTransport")} placeholder="0.00" /></div>
-            <div><label className="field-label">Mano de obra (real)</label><DecimalInput className="field" value={f.actualLabor} onChange={setV("actualLabor")} placeholder="0.00" /></div>
-            <div><label className="field-label">Otros (real)</label><DecimalInput className="field" value={f.actualOthers} onChange={setV("actualOthers")} placeholder="0.00" /></div>
+            <div><label className="field-label">Mano de obra (real, solo dato)</label><DecimalInput className="field" value={f.actualLabor} onChange={setV("actualLabor")} placeholder="0.00" /></div>
+            <div><label className="field-label">Otros (real, solo dato)</label><DecimalInput className="field" value={f.actualOthers} onChange={setV("actualOthers")} placeholder="0.00" /></div>
           </div>
         )}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2 text-sm">
@@ -3888,7 +3885,7 @@ function OT_printOrder(o) {
   const c = OT_calc(o);
   const esc = (s) => String(s === undefined || s === null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
   const row = (a, b) => `<tr><th>${a}</th><td>${b}</td></tr>`;
-  const ref = o.laborIsReference !== false;
+  const ref = true;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Orden de trabajo ${esc(o.number)}</title><style>
   body{font-family:Arial,Helvetica,sans-serif;color:#16202E;margin:32px;font-size:13px}h1{font-size:18px;margin:0;color:#12203A;text-align:center}
   .sub{text-align:center;color:#52606D;font-size:12px;margin:2px 0 16px}.meta{display:flex;justify-content:space-between;margin-bottom:12px;font-weight:600}
@@ -3913,7 +3910,7 @@ function OT_exportExcel(rows) {
   const ordenes = rows.map((r) => ({
     "N.º": r.number, Proyecto: r.name, Cliente: r.client, Lugar: r.place, Responsable: r.coordinator, Estado: OT_estadoMeta(r.status).label,
     "Fecha emisión": r.issue, "Inicio previsto": r.start, "Entrega prevista": r.end, "Entrega real": r.realEnd, "Avance %": r.progress,
-    "Materiales USD": num(r.raw.budgetMaterials), "Transporte USD": num(r.raw.budgetTransport), "Mano de obra USD (ref.)": num(r.raw.budgetLabor),
+    "Materiales USD": num(r.raw.budgetMaterials), "Transporte USD": num(r.raw.budgetTransport), "Mano de obra USD (solo dato)": num(r.raw.budgetLabor),
     "Total presupuestado USD": r.budget, "Ejecutado USD": r.actual, "Variación USD": r.variance, "Ejecución %": r.execPct,
     "Atrasada": r.late ? "Sí" : "No", "Entregada a tiempo": r.onTime === null ? "" : r.onTime ? "Sí" : "No",
   }));
@@ -3934,19 +3931,19 @@ function OT_recommendations(rows) {
   const over = act.filter((r) => r.over);
   if (over.length) out.push(`${over.length} orden(es) superan su presupuesto autorizado (sobrecosto total ${money(over.reduce((a, r) => a + r.variance, 0))}). Todo gasto adicional debe aprobarse antes de ejecutarse.`);
   const near = act.filter((r) => !r.over && !r.terminal && r.budget > 0 && r.execPct >= 90);
-  if (near.length) out.push(`${near.length} orden(es) ya consumieron 90% o más de su presupuesto sin estar entregadas.`);
+  if (near.length) out.push(`${near.length} orden(es) ya consumieron 90% o más de su presupuesto sin estar terminadas.`);
   const noDates = act.filter((r) => !r.terminal && (!r.start || !r.end));
   if (noDates.length) out.push(`${noDates.length} orden(es) sin fechas previstas de inicio o entrega: no se pueden controlar los plazos.`);
-  const noRec = act.filter((r) => r.status !== "borrador" && !r.raw.receivedDate);
+  const noRec = act.filter((r) => r.status === "terminado" && !r.raw.receivedDate);
   if (noRec.length) out.push(`${noRec.length} orden(es) sin fecha de recepción por el coordinador.`);
   const done = act.filter((r) => r.onTime !== null);
-  if (done.length) { const ok = done.filter((r) => r.onTime).length; out.push(`Cumplimiento de plazo en órdenes entregadas: ${Math.round((ok / done.length) * 100)}% (${ok} de ${done.length}).`); }
+  if (done.length) { const ok = done.filter((r) => r.onTime).length; out.push(`Cumplimiento de plazo en órdenes terminadas: ${Math.round((ok / done.length) * 100)}% (${ok} de ${done.length}).`); }
   if (!out.length) out.push("Las órdenes de trabajo están en control: sin atrasos ni sobrecostos.");
   return out;
 }
 
 /* ---- módulo ---- */
-function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest, onNewHandled, onOpenGastos }) {
+function OT_Module({ orders, onSaveOrder, onDeleteOrder, onSyncAll, cpProjects, newRequest, onNewHandled, onOpenGastos, focusId, onFocusHandled }) {
   const now = new Date();
   const [tab, setTab] = useState("resumen");
   const [editing, setEditing] = useState(null); // objeto en edición
@@ -3999,7 +3996,7 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
   const comp = {
     mat: valid.reduce((a, r) => a + num(r.raw.budgetMaterials), 0),
     trans: valid.reduce((a, r) => a + num(r.raw.budgetTransport), 0),
-    lab: valid.reduce((a, r) => a + (r.raw.laborIsReference !== false ? 0 : num(r.raw.budgetLabor)), 0),
+    lab: 0,
   };
   const compTot = comp.mat + comp.trans + comp.lab;
 
@@ -4016,11 +4013,17 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
   const save = (o) => { onSaveOrder(o); setEditing(null); };
   const remove = (id) => { onDeleteOrder(id); setConfirmId(null); };
   useEffect(() => { if (newRequest) { startNew(); onNewHandled && onNewHandled(); } }, [newRequest]);
+  useEffect(() => { if (focusId) { startEdit(focusId); onFocusHandled && onFocusHandled(); } }, [focusId]);
+  const [syncMsg, setSyncMsg] = useState("");
 
   const Header = (
     <div className="flex items-center justify-between gap-3 flex-wrap">
       <SubTabs tabs={[["resumen", "Resumen"], ["ordenes", "Órdenes"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setEditing(null); }} />
-      <button onClick={startNew} className="btn-primary text-xs py-2 px-3 flex items-center gap-1" style={{ display: "inline-flex" }}><Plus size={13} />Nueva orden de trabajo</button>
+      <div className="flex items-center gap-2 flex-wrap">
+        {syncMsg && <span className="text-xs" style={{ color: COLORS.green }}>{syncMsg}</span>}
+        <button onClick={() => { onSyncAll && onSyncAll(); setSyncMsg("Listo: todas las órdenes se replicaron en Proyectos, Planos y materiales y Actas."); setTimeout(() => setSyncMsg(""), 6000); }} className="btn-ghost text-xs py-2 px-3 flex items-center gap-1" style={{ display: "inline-flex" }} title="Crea/actualiza en los demás módulos todas las órdenes ya existentes"><RefreshCw size={13} />Sincronizar módulos</button>
+        <button onClick={startNew} className="btn-primary text-xs py-2 px-3 flex items-center gap-1" style={{ display: "inline-flex" }}><Plus size={13} />Nueva orden de trabajo</button>
+      </div>
     </div>
   );
 
@@ -4059,15 +4062,15 @@ function OT_Module({ orders, onSaveOrder, onDeleteOrder, cpProjects, newRequest,
           <KpiCard accent={COLORS.ink}><p className="kpi-number">{valid.length}</p><p className="kpi-label">Órdenes de trabajo (sin anuladas)</p></KpiCard>
           <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto autorizado total</p></KpiCard>
           <KpiCard accent={totA > totB ? COLORS.red : COLORS.green}><p className="kpi-number">{money(totA)}</p><p className="kpi-label">Ejecutado · {totB ? Math.round((totA / totB) * 100) : 0}% · {totA > totB ? "sobrecosto " : "saldo "}{money(Math.abs(totB - totA))}</p></KpiCard>
-          <KpiCard accent={COLORS.amber}><p className="kpi-number">{enEjec}</p><p className="kpi-label">Abiertas (no entregadas)</p></KpiCard>
+          <KpiCard accent={COLORS.amber}><p className="kpi-number">{enEjec}</p><p className="kpi-label">Abiertas (planificadas + en curso)</p></KpiCard>
           <KpiCard accent={atrasadas ? COLORS.red : COLORS.green}><p className="kpi-number">{atrasadas}</p><p className="kpi-label">Atrasadas</p></KpiCard>
           <KpiCard accent={sobre ? COLORS.red : COLORS.green}><p className="kpi-number">{sobre}</p><p className="kpi-label">Sobre presupuesto</p></KpiCard>
           <KpiCard accent={aTiempo !== null && aTiempo < 80 ? COLORS.amber : COLORS.green}><p className="kpi-number">{aTiempo === null ? "—" : aTiempo + "%"}</p><p className="kpi-label">Entregadas a tiempo</p></KpiCard>
-          <KpiCard accent={valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0)))}</p><p className="kpi-label">{valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? "Excedente" : "Ahorro"} incluida la mano de obra</p></KpiCard>
+          <KpiCard accent={valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0)))}</p><p className="kpi-label">{valid.reduce((a, r) => a + r.budgetAll - r.actualAll, 0) < 0 ? "Excedente" : "Ahorro"} (materiales + transporte)</p></KpiCard>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Panel><PanelHeader title={"Órdenes emitidas y cerradas por mes · " + chartYear} />
+          <Panel><PanelHeader title={"Órdenes emitidas y terminadas por mes · " + chartYear} />
             <OT_GroupedBars data={monthData.map((d) => ({ ...d, a: d.emit, b: d.entr }))} colors={[COLORS.ink, COLORS.green]} names={["Emitidas", "Entregadas/cerradas"]} selected={fMonth === "todos" ? null : Number(fMonth)} onPick={(m) => { setFMonth(String(m)); if (fYear === "todos") setFYear(String(chartYear)); }} /></Panel>
           <Panel><PanelHeader title={"Presupuesto vs. ejecutado por mes (USD) · " + chartYear} />
             <OT_GroupedBars data={monthData} colors={[COLORS.steel, COLORS.amber]} names={["Presupuestado", "Ejecutado"]} fmt={(v) => "$" + Math.round(v)} selected={fMonth === "todos" ? null : Number(fMonth)} onPick={(m) => { setFMonth(String(m)); if (fYear === "todos") setFYear(String(chartYear)); }} /></Panel>
@@ -4298,8 +4301,8 @@ function OT_openReport(rows) {
       { label: "Órdenes (sin anuladas)", value: String(valid.length) }, { label: "Presupuesto autorizado", value: money(totB) }, { label: "Ejecutado", value: money(totA) },
       { label: "Abiertas", value: String(valid.filter((r) => !r.terminal).length) }, { label: "Atrasadas", value: String(valid.filter((r) => r.late).length), color: "#C1443D" },
       { label: "Sobre presupuesto", value: String(valid.filter((r) => r.over).length), color: "#C1443D" },
-      { label: "Entregadas a tiempo", value: entreg.length ? Math.round((entreg.filter((r) => r.onTime).length / entreg.length) * 100) + "%" : "—" },
-      { label: (resAll >= 0 ? "Ahorro" : "Excedente") + " con mano de obra", value: money(Math.abs(resAll)), color: resAll >= 0 ? "#2F7D5B" : "#C1443D" },
+      { label: "Terminadas a tiempo", value: entreg.length ? Math.round((entreg.filter((r) => r.onTime).length / entreg.length) * 100) + "%" : "—" },
+      { label: (resAll >= 0 ? "Ahorro" : "Excedente") + " (mat. + transp.)", value: money(Math.abs(resAll)), color: resAll >= 0 ? "#2F7D5B" : "#C1443D" },
     ],
     sections: [
       { heading: "Presupuesto autorizado vs. ejecutado por orden", svg: RPT_barsSvg(valid.map((r) => ({ label: "N.º " + r.number + " " + r.name, a: r.budget, b: r.actual, bColor: r.over ? "#C1443D" : "#E8A33D" })), ["Presupuesto", "Ejecutado"], (v) => "$" + v.toFixed(0)) },
@@ -4347,7 +4350,8 @@ const GAS_catMeta = (k) => GAS_CATS.find((c) => c.key === k) || GAS_CATS[3];
 function OT_withExpenses(orders, expenses) {
   const by = {};
   (expenses || []).forEach((e) => { (by[e.otId] = by[e.otId] || []).push(e); });
-  return orders.map((o) => {
+  return orders.map((o0) => {
+    const o = { ...o0, status: OT_normStatus(o0.status) };
     const list = by[o.id];
     if (!list || !list.length) return o;
     const sum = (cat) => r2(list.filter((e) => e.category === cat).reduce((a, e) => a + num(e.amount), 0));
@@ -4359,10 +4363,10 @@ function GAS_orderRows(orders) {
   return orders.filter((o) => o.status !== "anulada").map((o) => {
     const bMat = num(o.budgetMaterials), bTr = num(o.budgetTransport), bLab = num(o.budgetLabor);
     const aMat = num(o.actualMaterials), aTr = num(o.actualTransport), aLab = num(o.actualLabor), aOth = num(o.actualOthers);
-    const budgetEx = r2(bMat + bTr), actualEx = r2(aMat + aTr + aOth);
-    const budgetAll = r2(bMat + bTr + bLab), actualAll = r2(actualEx + aLab);
+    const budgetEx = r2(bMat + bTr), actualEx = r2(aMat + aTr);
+    const budgetAll = budgetEx, actualAll = actualEx;
     return {
-      id: o.id, number: num(o.number), name: o.name || "Sin nombre", client: o.client || "Sin cliente", status: o.status || "borrador", raw: o,
+      id: o.id, number: num(o.number), name: o.name || "Sin nombre", client: o.client || "Sin cliente", status: OT_normStatus(o.status), raw: o,
       bMat, bTr, bLab, aMat, aTr, aLab, aOth,
       budgetEx, actualEx, resultEx: r2(budgetEx - actualEx), pctEx: budgetEx > 0 ? Math.round((actualEx / budgetEx) * 100) : 0,
       budgetAll, actualAll, resultAll: r2(budgetAll - actualAll), pctAll: budgetAll > 0 ? Math.round((actualAll / budgetAll) * 100) : 0,
@@ -4380,6 +4384,7 @@ function GAS_unapproved(rows, expenses) {
     if (r.budgetAll <= 0) return;
     let cum = 0;
     expenses.filter((e) => e.otId === r.id).sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach((e) => {
+      if (e.category !== "materiales" && e.category !== "transporte") return;
       cum += num(e.amount);
       if (cum > r.budgetAll + 0.004 && !e.approved) out.push({ e, r });
     });
@@ -4490,16 +4495,16 @@ function GAS_recs(rows, exps, basis) {
   const out = [];
   const exc = rows.filter((r) => GAS_pick(r, basis).result < -0.004);
   if (exc.length) out.push(`${exc.length} orden(es) con excedente sobre presupuesto (${money(exc.reduce((a, r) => a + GAS_pick(r, basis).result, 0))}). Prioriza: ${exc.sort((a, b) => GAS_pick(a, basis).result - GAS_pick(b, basis).result).slice(0, 3).map((r) => "N.º " + r.number).join(", ")}.`);
-  const near = rows.filter((r) => { const p = GAS_pick(r, basis); return p.result >= 0 && p.budget > 0 && p.pct >= 85 && r.status !== "entregada" && r.status !== "cerrada"; });
+  const near = rows.filter((r) => { const p = GAS_pick(r, basis); return p.result >= 0 && p.budget > 0 && p.pct >= 85 && r.status !== "terminado"; });
   if (near.length) out.push(`${near.length} orden(es) abiertas ya consumieron 85% o más del presupuesto: ${near.slice(0, 4).map((r) => "N.º " + r.number).join(", ")}. Congela gastos nuevos hasta revisar el avance físico.`);
   const un = GAS_unapproved(rows, exps);
   if (un.length) out.push(`${un.length} gasto(s) por ${money(un.reduce((a, x) => a + num(x.e.amount), 0))} superaron el presupuesto sin marcar aprobación previa. Regulariza la autorización del gasto adicional.`);
-  const ahorro = rows.filter((r) => (r.status === "entregada" || r.status === "cerrada") && GAS_pick(r, basis).result > 0);
-  if (ahorro.length) out.push(`${ahorro.length} orden(es) cerradas con ahorro total de ${money(ahorro.reduce((a, r) => a + GAS_pick(r, basis).result, 0))}: documenta qué se hizo bien para replicarlo.`);
-  const sinGasto = rows.filter((r) => r.status === "en_ejecucion" && r.actualAll === 0);
+  const ahorro = rows.filter((r) => r.status === "terminado" && GAS_pick(r, basis).result > 0);
+  if (ahorro.length) out.push(`${ahorro.length} orden(es) terminadas con ahorro total de ${money(ahorro.reduce((a, r) => a + GAS_pick(r, basis).result, 0))}: documenta qué se hizo bien para replicarlo.`);
+  const sinGasto = rows.filter((r) => r.status === "en_curso" && r.actualAll === 0);
   if (sinGasto.length) out.push(`${sinGasto.length} orden(es) en ejecución sin gastos registrados: confirma que el registro esté al día.`);
   const labBud = rows.reduce((a, r) => a + r.bLab, 0), labAct = rows.reduce((a, r) => a + r.aLab, 0);
-  if (labBud > 0 || labAct > 0) out.push(`Mano de obra: referencia ${money(labBud)} · real ${money(labAct)} (${labAct > labBud ? "excede " : "por debajo en "}${money(Math.abs(labAct - labBud))}).`);
+  if (labBud > 0 || labAct > 0) out.push(`Mano de obra (solo dato, no se suma al análisis): referencia ${money(labBud)} · real ${money(labAct)} (${labAct > labBud ? "excede " : "por debajo en "}${money(Math.abs(labAct - labBud))}).`);
   if (!out.length) out.push("Los gastos están dentro del presupuesto de todas las órdenes.");
   return out;
 }
@@ -4512,9 +4517,9 @@ function GAS_exportExcel(rows, exps, orderLabel) {
   }))), "Gastos");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((r) => ({
     "N.º": r.number, Proyecto: r.name, Cliente: r.client, Estado: OT_estadoMeta(r.status).label,
-    "Pres. materiales": r.bMat, "Pres. transporte": r.bTr, "Pres. mano de obra": r.bLab, "Pres. total sin MO": r.budgetEx, "Pres. total con MO": r.budgetAll,
-    "Real materiales": r.aMat, "Real transporte": r.aTr, "Real mano de obra": r.aLab, "Real otros": r.aOth, "Real total sin MO": r.actualEx, "Real total con MO": r.actualAll,
-    "Resultado sin MO (+ahorro / −excedente)": r.resultEx, "Resultado con MO (+ahorro / −excedente)": r.resultAll, "Ejecución % con MO": r.pctAll,
+    "Pres. materiales": r.bMat, "Pres. transporte": r.bTr, "Pres. mano de obra (dato)": r.bLab, "Pres. total (mat.+transp.)": r.budgetEx,
+    "Real materiales": r.aMat, "Real transporte": r.aTr, "Real mano de obra": r.aLab, "Real otros (dato)": r.aOth, "Real total (mat.+transp.)": r.actualEx,
+    "Resultado (+ahorro / −excedente)": r.resultEx, "Ejecución %": r.pctEx,
   }))), "Por orden");
   const grp = (keyFn) => { const m = {}; exps.forEach((e) => { const k = keyFn(e) || "—"; m[k] = m[k] || { n: 0, t: 0 }; m[k].n++; m[k].t += num(e.amount); }); return Object.entries(m).map(([k, v]) => ({ Grupo: k, "N.º gastos": v.n, "Total USD": r2(v.t) })).sort((a, b) => b["Total USD"] - a["Total USD"]); };
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(grp((e) => GAS_catMeta(e.category).label)), "Por categoría");
@@ -4524,12 +4529,12 @@ function GAS_exportExcel(rows, exps, orderLabel) {
 }
 
 function GAS_openReport(rows, exps, basis, orderLabel) {
-  const bl = basis === "sin" ? "sin mano de obra" : "incluida la mano de obra";
+  const bl = "solo materiales y transporte (la mano de obra es solo dato)";
   const P = rows.map((r) => ({ r, p: GAS_pick(r, basis) }));
   const totB = r2(P.reduce((a, x) => a + x.p.budget, 0)), totA = r2(P.reduce((a, x) => a + x.p.actual, 0)), res = r2(totB - totA);
   const un = GAS_unapproved(rows, exps);
   const catRows = GAS_CATS.map((c) => {
-    const bud = c.key === "materiales" ? rows.reduce((a, r) => a + r.bMat, 0) : c.key === "transporte" ? rows.reduce((a, r) => a + r.bTr, 0) : c.key === "mano_obra" ? rows.reduce((a, r) => a + r.bLab, 0) : 0;
+    const bud = c.key === "materiales" ? rows.reduce((a, r) => a + r.bMat, 0) : c.key === "transporte" ? rows.reduce((a, r) => a + r.bTr, 0) : 0;
     const act = r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0));
     return [c.label, money(bud), money(act), { v: money(bud - act), color: bud - act < 0 ? "#C1443D" : "#2F7D5B" }];
   });
@@ -4548,7 +4553,7 @@ function GAS_openReport(rows, exps, basis, orderLabel) {
       { heading: "Ahorro / excedente por orden", svg: RPT_divergingSvg(P.map((x) => ({ label: "N.º " + x.r.number + " " + x.r.name, value: x.p.result })).sort((a, b) => a.value - b.value), (v) => "$" + v.toFixed(2)) },
       { heading: "Detalle por orden", table: { head: ["N.º", "Proyecto", "Estado", "Presupuesto", "Gasto real", "Resultado", "Ejec."], align: ["left", "left", "left", "right", "right", "right", "right"],
         rows: P.map((x) => [x.r.number, x.r.name, OT_estadoMeta(x.r.status).label, money(x.p.budget), money(x.p.actual), { v: (x.p.result < 0 ? "Excedente " : "Ahorro ") + money(Math.abs(x.p.result)), color: x.p.result < 0 ? "#C1443D" : "#2F7D5B" }, x.p.pct + "%"]) } },
-      { heading: "Por categoría (la mano de obra se compara contra su referencia)", table: { head: ["Categoría", "Presupuesto", "Gasto real", "Diferencia"], align: ["left", "right", "right", "right"], rows: catRows } },
+      { heading: "Por categoría (mano de obra y otros: solo dato informativo)", table: { head: ["Categoría", "Presupuesto", "Gasto real", "Diferencia"], align: ["left", "right", "right", "right"], rows: catRows } },
       { heading: "Principales proveedores", table: { head: ["Proveedor", "Total"], align: ["left", "right"], rows: Object.entries(sup).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => [k, money(v)]) } },
       { heading: "Análisis y recomendaciones", bullets: GAS_recs(rows, exps, basis) },
     ],
@@ -4563,8 +4568,9 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
   const isLab = f.category === "mano_obra";
   const order = orders.find((o) => o.id === f.otId);
   const row = order ? GAS_orderRows([order])[0] : null;
-  const others = expenses.filter((e) => e.otId === f.otId && e.id !== f.id).reduce((a, e) => a + num(e.amount), 0);
-  const after = row ? r2(row.budgetAll - (others + num(f.amount))) : 0;
+  const others = expenses.filter((e) => e.otId === f.otId && e.id !== f.id && (e.category === "materiales" || e.category === "transporte")).reduce((a, e) => a + num(e.amount), 0);
+  const counts = f.category === "materiales" || f.category === "transporte";
+  const after = row ? r2(row.budgetAll - (others + (counts ? num(f.amount) : 0))) : 0;
   const submit = (e) => {
     e.preventDefault();
     if (!f.otId) { setErr("Elige la orden de trabajo a la que pertenece el gasto."); return; }
@@ -4597,7 +4603,7 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
       <div><label className="field-label">Notas</label><textarea className="field" rows={2} value={f.notes} onChange={set("notes")} /></div>
       {row && (
         <div className="p-3 rounded text-xs space-y-1" style={{ background: "var(--steel-100)", color: "var(--text-600)" }}>
-          <p>Presupuesto de la orden (incl. mano de obra): <strong>{money(row.budgetAll)}</strong> · ya gastado sin este registro: <strong>{money(others)}</strong></p>
+          <p>Presupuesto de la orden (materiales + transporte): <strong>{money(row.budgetAll)}</strong> · ya gastado sin este registro: <strong>{money(others)}</strong></p>
           <p style={{ color: after < 0 ? COLORS.red : COLORS.green, fontWeight: 600 }}>{after < 0 ? "Con este gasto la orden queda con excedente de " : "Con este gasto la orden queda con saldo de "}{money(Math.abs(after))}</p>
         </div>
       )}
@@ -4610,7 +4616,7 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
 function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandled }) {
   const now = new Date();
   const [tab, setTab] = useState("resumen");
-  const [basis, setBasis] = useState("con");
+  const [basis] = useState("sin");
   const [fYear, setFYear] = useState("todos");
   const [fMonth, setFMonth] = useState("todos");
   const [fOrder, setFOrder] = useState("todos");
@@ -4683,7 +4689,6 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
         <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
         <div><label className="field-label">Categoría</label><select className="field" value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="todos">Todas</option>{GAS_CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
         <div><label className="field-label">Estado de la orden</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option>{OT_ESTADOS.filter((s) => s.key !== "anulada").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
-        <div><label className="field-label">Resultado</label><select className="field" value={basis} onChange={(e) => setBasis(e.target.value)}><option value="con">Con mano de obra</option><option value="sin">Sin mano de obra</option></select></div>
         <div><label className="field-label">Buscar</label><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Concepto, proveedor…" /></div>
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
@@ -4701,12 +4706,12 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
         {Header}{Filters}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard accent={COLORS.ink}><p className="kpi-number">{money(gastoPeriodo)}</p><p className="kpi-label">Gasto del filtro ({exps.length} registros)</p></KpiCard>
-          <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto de las órdenes {basis === "con" ? "(con mano de obra)" : "(sin mano de obra)"}</p></KpiCard>
+          <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto de las órdenes (materiales + transporte)</p></KpiCard>
           <KpiCard accent={res < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(res))}</p><p className="kpi-label">{resTxt(res)} acumulado · {totB ? Math.round((totA / totB) * 100) : 0}% ejecutado</p></KpiCard>
           <KpiCard accent={exceso ? COLORS.red : COLORS.green}><p className="kpi-number">{exceso}</p><p className="kpi-label">Órdenes con excedente</p></KpiCard>
-          <KpiCard accent={resEx < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(resEx))}</p><p className="kpi-label">{resTxt(resEx)} SIN mano de obra</p></KpiCard>
-          <KpiCard accent={resAll < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(resAll))}</p><p className="kpi-label">{resTxt(resAll)} CON mano de obra</p></KpiCard>
-          <KpiCard accent={COLORS.green}><p className="kpi-number">{money(labAct)}</p><p className="kpi-label">Mano de obra real · referencia {money(labBud)}</p></KpiCard>
+          <KpiCard accent="#2563EB"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aMat, 0))}</p><p className="kpi-label">Materiales ejecutados</p></KpiCard>
+          <KpiCard accent="#0EA5A4"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aTr, 0))}</p><p className="kpi-label">Transporte ejecutado</p></KpiCard>
+          <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(labAct)}</p><p className="kpi-label">Mano de obra (solo dato, no se suma)</p></KpiCard>
           <KpiCard accent={un.length ? COLORS.amber : COLORS.green}><p className="kpi-number">{un.length}</p><p className="kpi-label">Gastos sobre presupuesto sin aprobar</p></KpiCard>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -4773,12 +4778,12 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
       <div className="space-y-6">
         {Header}{Filters}
         <Panel>
-          <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Seguimiento presupuestario por orden. <strong style={{ color: COLORS.green }}>+ ahorro</strong> · <strong style={{ color: COLORS.red }}>− excedente</strong>. «Sin MO» compara solo materiales y transporte; «Con MO» incluye la mano de obra.</p>
+          <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Seguimiento presupuestario por orden. <strong style={{ color: COLORS.green }}>+ ahorro</strong> · <strong style={{ color: COLORS.red }}>− excedente</strong>. Se compara solo materiales + transporte; la mano de obra se muestra únicamente como dato.</p>
           {sortedRows.length ? (
             <div className="overflow-x-auto"><table className="w-full text-sm">
               <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
-                <Th k="number">N.º</Th><Th k="name">Proyecto</Th><Th k="status">Estado</Th><Th k="budgetEx" right>Pres. sin MO</Th><Th k="actualEx" right>Real sin MO</Th><Th k="resultEx" right>Resultado sin MO</Th>
-                <Th k="bLab" right>MO ref.</Th><Th k="aLab" right>MO real</Th><Th k="budgetAll" right>Pres. con MO</Th><Th k="actualAll" right>Real con MO</Th><Th k="resultAll" right>Resultado con MO</Th><Th k="pctAll" right>Ejec.</Th>
+                <Th k="number">N.º</Th><Th k="name">Proyecto</Th><Th k="status">Estado</Th><Th k="budgetEx" right>Pres. mat.+transp.</Th><Th k="actualEx" right>Real mat.+transp.</Th><Th k="resultEx" right>Resultado</Th>
+                <Th k="bLab" right>MO (dato)</Th><Th k="aLab" right>MO real (dato)</Th><Th k="pctAll" right>Ejec.</Th>
               </tr></thead>
               <tbody>
                 {sortedRows.map((r) => (
@@ -4788,7 +4793,6 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
                     <td className="py-2 pr-3 whitespace-nowrap"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: OT_estadoMeta(r.status).color, marginRight: 6 }} />{OT_estadoMeta(r.status).label}</td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budgetEx)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.actualEx)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{cell(r.resultEx)}</td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.bLab)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.aLab)}</td>
-                    <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budgetAll)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.actualAll)}</td><td className="py-2 pr-3 text-right whitespace-nowrap">{cell(r.resultAll)}</td>
                     <td className="py-2 pr-3 text-right" style={{ color: r.pctAll > 100 ? COLORS.red : "var(--text-900)" }}>{r.pctAll}%</td>
                   </tr>
                 ))}
@@ -4796,7 +4800,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
                   <td colSpan={3} className="py-2 pr-3 text-right font-semibold">Totales</td>
                   <td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.budgetEx, 0))}</td><td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.actualEx, 0))}</td><td className="py-2 pr-3 text-right">{cell(resEx)}</td>
                   <td className="py-2 pr-3 text-right font-semibold">{money(labBud)}</td><td className="py-2 pr-3 text-right font-semibold">{money(labAct)}</td>
-                  <td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.budgetAll, 0))}</td><td className="py-2 pr-3 text-right font-semibold">{money(rows.reduce((a, r) => a + r.actualAll, 0))}</td><td className="py-2 pr-3 text-right">{cell(resAll)}</td><td />
+                  <td />
                 </tr>
               </tbody></table></div>
           ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>No hay órdenes con estos filtros.</p>}
@@ -5016,349 +5020,585 @@ function RES_ClientBars({ rows, active, onPick }) {
   );
 }
 
-function ResumenModule({ proyectos, calItems, matProjects, actDocs, cajaFunds, cajaExpenses, otOrders, goTo }) {
-  const now = new Date();
-  const [fYear, setFYear] = useState(String(now.getFullYear()));
-  const [fMonth, setFMonth] = useState("todos");
-  const [fBasis, setFBasis] = useState("iniciados");
-  const [fEstado, setFEstado] = useState("todos");
-  const [fClient, setFClient] = useState("todos");
-  const [sort, setSort] = useState({ key: "start", dir: "desc" });
+/* ===== VISUAL: paleta viva y componentes compartidos ===== */
+const VIV = { blue: "#2563EB", orange: "#FF7A00", teal: "#0EA5A4", violet: "#7C3AED", pink: "#EC4899", green: "#16A34A", amber: "#F59E0B", red: "#EF4444", navy: "#12203A" };
+const VIV_LIST = [VIV.blue, VIV.orange, VIV.teal, VIV.violet, VIV.pink, VIV.green, VIV.amber, VIV.red];
 
-  const allRows = useMemo(() => RES_buildRows(proyectos), [proyectos]);
-  const years = useMemo(() => {
-    const s = new Set([String(now.getFullYear())]);
-    allRows.forEach((r) => { if (r.start) s.add(r.start.slice(0, 4)); if (r.end) s.add(r.end.slice(0, 4)); });
-    return [...s].sort().reverse();
-  }, [allRows]);
-  const clients = useMemo(() => [...new Set(allRows.map((r) => r.client))].sort(), [allRows]);
-
-  const baseRows = allRows.filter((r) => (fEstado === "todos" || r.estado === fEstado) && (fClient === "todos" || r.client === fClient));
-  const periodRows = baseRows.filter((r) => {
-    if (fYear === "todos" && fMonth === "todos") return true;
-    if (fBasis === "iniciados") return RES_inMonth(r.start, fYear, fMonth);
-    if (fBasis === "terminados") return RES_inMonth(r.end, fYear, fMonth);
-    return RES_activeInMonth(r, fYear, fMonth);
-  });
-  const filtered = periodRows;
-  const estadoRowsForDonut = allRows.filter((r) => (fClient === "todos" || r.client === fClient)).filter((r) => {
-    if (fYear === "todos" && fMonth === "todos") return true;
-    if (fBasis === "iniciados") return RES_inMonth(r.start, fYear, fMonth);
-    if (fBasis === "terminados") return RES_inMonth(r.end, fYear, fMonth);
-    return RES_activeInMonth(r, fYear, fMonth);
-  });
-
-  const iniciadosPeriodo = baseRows.filter((r) => RES_inMonth(r.start, fYear, fMonth)).length;
-  const terminadosPeriodo = baseRows.filter((r) => RES_inMonth(r.end, fYear, fMonth)).length;
-  const activosAhora = baseRows.filter((r) => r.estado !== "culminado").length;
-  const criticos = filtered.filter((r) => r.estado === "critico").length;
-  const conDur = filtered.filter((r) => r.dur !== null);
-  const durProm = conDur.length ? Math.round(conDur.reduce((a, r) => a + r.dur, 0) / conDur.length) : null;
-  const totPres = filtered.reduce((a, r) => a + r.presupuesto, 0);
-  const totEjec = filtered.reduce((a, r) => a + r.ejecutado, 0);
-  const avProm = filtered.length ? Math.round(filtered.reduce((a, r) => a + r.avance, 0) / filtered.length) : 0;
-  const sinFecha = allRows.filter((r) => r.sinFechaControl).length;
-  const termSinFecha = allRows.filter((r) => r.terminadoSinFecha).length;
-
-  const estadoGroups = RES_ESTADOS.map((e) => ({ ...e, count: estadoRowsForDonut.filter((r) => r.estado === e.key).length }));
-
-  const sorted = [...filtered].sort((a, b) => {
-    const k = sort.key;
-    const av = a[k], bv = b[k];
-    let c;
-    if (av === null || av === "" || av === undefined) c = (bv === null || bv === "" || bv === undefined) ? 0 : 1;
-    else if (bv === null || bv === "" || bv === undefined) c = -1;
-    else c = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv), "es");
-    return sort.dir === "asc" ? c : -c;
-  });
-  const setSortKey = (key) => setSort((s) => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
-
-  const hayFiltros = fYear !== String(now.getFullYear()) || fMonth !== "todos" || fBasis !== "iniciados" || fEstado !== "todos" || fClient !== "todos";
-  const reset = () => { setFYear(String(now.getFullYear())); setFMonth("todos"); setFBasis("iniciados"); setFEstado("todos"); setFClient("todos"); };
-  const periodoTxt = (fMonth !== "todos" ? RES_MESES_LARGO[Number(fMonth) - 1] + " " : "") + (fYear !== "todos" ? fYear : (fMonth !== "todos" ? "(todos los años)" : "todo el histórico"));
-  const estadoLabel = (k) => RES_ESTADOS.find((e) => e.key === k).label;
-
-  const exportExcel = () => {
-    const data = sorted.map((r) => ({
-      Proyecto: r.name, Cliente: r.client, Estado: estadoLabel(r.estado), "Fecha inicio": r.start || "", "Fecha terminado": r.end || "",
-      "Duración (días)": r.dur === null ? "" : r.dur, "Avance físico %": r.avance, "Presupuesto USD": r.presupuesto, "Ejecutado USD": r.ejecutado, "Ejecución %": r.ejecPct, "Riesgos abiertos": r.riesgos,
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Proyectos");
-    XLSX.writeFile(wb, "resumen_proyectos_" + todayISO() + ".xlsx");
-  };
-
-  /* ---- otros módulos ---- */
-  const crossings = useMemo(() => CAL_detectCrossings(calItems), [calItems]);
-  const matPendientes = matProjects.filter((p) => !MAT_planosStats(p).completo || !MAT_materialesStats(p).completo).length;
-  const actPendientes = actDocs.filter((d) => d.status !== "firmado").length;
-  const alerts = [];
-  allRows.filter((r) => r.estado === "critico").forEach((r) => alerts.push({ mod: "Proyectos", text: `"${r.name}" está en estado crítico.` }));
-  if (crossings.length > 0) alerts.push({ mod: "Calendario", text: `${crossings.length} cruce(s) de recursos detectados en el cronograma.` });
-  const today = todayISO();
-  matProjects.forEach((p) => {
-    const ps = MAT_planosStats(p), ms = MAT_materialesStats(p);
-    if (p.planosDueDate && p.planosDueDate < today && !ps.completo) alerts.push({ mod: "Materiales", text: `Planos de "${p.name}" vencidos sin aprobar.` });
-    if (p.materialesDueDate && p.materialesDueDate < today && !ms.completo) alerts.push({ mod: "Materiales", text: `Materiales de "${p.name}" vencidos sin completar.` });
-  });
-  const staleDocs = actDocs.filter((d) => d.status !== "firmado" && d.date && daysBetween(d.date, today) >= 15);
-  if (staleDocs.length) alerts.push({ mod: "Actas", text: `${staleDocs.length} documento(s) llevan 15 días o más sin firmarse.` });
-  const cajaBalance = CAJA_computeBalance(cajaFunds, cajaExpenses);
-  if (cajaBalance.totalFunds > 0 && cajaBalance.balance < cajaBalance.totalFunds * 0.2) {
-    alerts.push({ mod: "Caja chica", text: `El saldo disponible (${money(cajaBalance.balance)}) está por debajo del 20% del total entregado histórico.` });
-  }
-  const otRows = OT_buildRows(otOrders || []).filter((r) => r.status !== "anulada");
-  const otAbiertas = otRows.filter((r) => !r.terminal).length;
-  const otAtras = otRows.filter((r) => r.late);
-  const otSobre = otRows.filter((r) => r.over);
-  const gasRows = GAS_orderRows(otOrders || []);
-  const gasRes = r2(gasRows.reduce((a, r) => a + r.resultAll, 0));
-  const gasTot = r2(gasRows.reduce((a, r) => a + r.actualAll, 0));
-  const otPres = r2(otRows.reduce((a, r) => a + r.budget, 0));
-  const otEjec = r2(otRows.reduce((a, r) => a + r.actual, 0));
-  otAtras.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" atrasada respecto a su fecha de entrega.` }));
-  otSobre.forEach((r) => alerts.push({ mod: "Órdenes", text: `Orden N.º ${r.number} "${r.name}" supera su presupuesto en ${money(r.variance)}.` }));
-  const SECTIONS = [["proyectos", "Control de proyectos"], ["calendario", "Calendario"], ["materiales", "Planos y materiales"], ["actas", "Actas y órdenes"], ["ordenes", "Órdenes de trabajo"], ["gastos", "Control de gasto GAM"], ["caja", "Caja chica"]];
-
-  const Th = ({ k, children, right }) => (
-    <th className="font-medium pb-2 pr-3 cursor-pointer select-none whitespace-nowrap" style={{ textAlign: right ? "right" : "left" }} onClick={() => setSortKey(k)}>
-      {children}{sort.key === k ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-    </th>
-  );
-
+function ModuleBanner({ title, subtitle, from, to, children }) {
   return (
-    <div className="space-y-6">
-      <div className="relative mb-2" style={{ overflow: "hidden" }}>
-        <img src={getLogo()} alt="" aria-hidden="true" style={{ position: "absolute", top: -28, right: -16, width: 150, opacity: 0.07, transform: "rotate(-8deg)", pointerEvents: "none" }} />
-        <div className="flex items-center gap-3 relative" style={{ zIndex: 1 }}>
-          <div style={{ background: "#fff", border: "1px solid var(--steel-200)", borderRadius: 8, padding: 5, display: "flex", flexShrink: 0 }}>
-            <img src={getLogo()} alt="Logo" style={{ height: 32, width: 32, objectFit: "contain" }} />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>Resumen general</h2>
-            <p className="text-sm" style={{ color: "var(--text-600)" }}>Control gerencial por proyecto y por mes · {fdate(todayISO())}</p>
-          </div>
-        </div>
+    <div className="no-print" style={{ background: "linear-gradient(120deg," + (from || VIV.navy) + "," + (to || VIV.blue) + ")", borderRadius: 16, padding: "18px 22px", marginBottom: 20, color: "#fff", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", boxShadow: "0 8px 24px -10px " + (to || VIV.blue) + "99" }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 6, display: "flex", flexShrink: 0 }}>
+        <img src={getLogo()} alt="Logo" style={{ height: 44, width: 44, objectFit: "contain" }} />
       </div>
-
-      <Panel>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div>
-            <label className="field-label">Año</label>
-            <select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}>
-              <option value="todos">Todos</option>
-              {years.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Mes</label>
-            <select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}>
-              <option value="todos">Todos</option>
-              {RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Mostrar proyectos…</label>
-            <select className="field" value={fBasis} onChange={(e) => setFBasis(e.target.value)}>
-              <option value="iniciados">Iniciados en el período</option>
-              <option value="terminados">Terminados en el período</option>
-              <option value="activos">Activos durante el período</option>
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Estado</label>
-            <select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}>
-              <option value="todos">Todos</option>
-              {RES_ESTADOS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Cliente</label>
-            <select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}>
-              <option value="todos">Todos</option>
-              {clients.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
-          <p className="text-xs" style={{ color: "var(--text-600)" }}>Período: <strong>{periodoTxt}</strong> · {filtered.length} proyecto(s) en el filtro</p>
-          <div className="flex gap-2">
-            {hayFiltros && <button onClick={reset} className="btn-ghost py-1 px-3 text-xs">Restablecer filtros</button>}
-            <button onClick={exportExcel} className="btn-ghost py-1 px-3 text-xs">Exportar a Excel</button>
-          </div>
-        </div>
-        {(sinFecha > 0 || termSinFecha > 0) && (
-          <p className="text-xs mt-2" style={{ color: COLORS.amberDark }}>
-            {sinFecha > 0 && `${sinFecha} proyecto(s) sin fecha de inicio de control (se usa la fecha de inicio del proyecto). `}
-            {termSinFecha > 0 && `${termSinFecha} proyecto(s) culminado(s) sin fecha de terminado: no entran en el conteo mensual. `}
-            Se completan editando el proyecto en Control de proyectos (lápiz junto al nombre).
-          </p>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard accent={COLORS.ink}>
-          <p className="kpi-number">{iniciadosPeriodo}</p>
-          <p className="kpi-label">Iniciados · {periodoTxt}</p>
-        </KpiCard>
-        <KpiCard accent={COLORS.green}>
-          <p className="kpi-number">{terminadosPeriodo}</p>
-          <p className="kpi-label">Terminados · {periodoTxt}</p>
-        </KpiCard>
-        <KpiCard accent={COLORS.steel}>
-          <p className="kpi-number">{activosAhora}</p>
-          <p className="kpi-label">En ejecución hoy{criticos > 0 ? " · " + criticos + " crítico(s) en el filtro" : ""}</p>
-        </KpiCard>
-        <KpiCard accent={COLORS.amber}>
-          <p className="kpi-number">{durProm === null ? "—" : durProm + " d"}</p>
-          <p className="kpi-label">Duración promedio (inicio → terminado)</p>
-        </KpiCard>
-        <KpiCard accent="var(--steel-300)">
-          <p className="kpi-number">{avProm}%</p>
-          <p className="kpi-label">Avance físico promedio del filtro</p>
-        </KpiCard>
-        <KpiCard accent="var(--steel-300)">
-          <p className="kpi-number">{money(totPres)}</p>
-          <p className="kpi-label">Presupuesto total del filtro</p>
-        </KpiCard>
-        <KpiCard accent={totPres > 0 && totEjec > totPres ? COLORS.red : "var(--steel-300)"}>
-          <p className="kpi-number">{money(totEjec)}</p>
-          <p className="kpi-label">Ejecutado · {totPres ? Math.round((totEjec / totPres) * 100) : 0}% del presupuesto</p>
-        </KpiCard>
-        <KpiCard accent={cajaBalance.balance < cajaBalance.totalFunds * 0.2 ? COLORS.red : COLORS.green}>
-          <p className="kpi-number">{money(cajaBalance.balance)}</p>
-          <p className="kpi-label">Saldo disponible en caja chica</p>
-        </KpiCard>
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <p style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, lineHeight: 1.15 }}>{title}</p>
+        {subtitle && <p style={{ fontSize: 12.5, opacity: 0.85, marginTop: 3 }}>{subtitle}</p>}
       </div>
+      {children}
+    </div>
+  );
+}
 
-      <Panel>
-        <PanelHeader title="Proyectos por mes — iniciados, terminados y activos" />
-        <RES_MonthlyChart rows={baseRows} year={fYear} month={fMonth} onPickMonth={(m, y) => { setFMonth(String(m)); setFYear(String(y)); }} />
-      </Panel>
+function VStat({ color, label, value, sub, icon }) {
+  return (
+    <div style={{ background: "linear-gradient(135deg," + color + "," + color + "CC)", borderRadius: 14, padding: "14px 16px", color: "#fff", boxShadow: "0 6px 16px -8px " + color }}>
+      <p style={{ fontSize: 11.5, opacity: 0.9, display: "flex", justifyContent: "space-between" }}><span>{label}</span><span>{icon}</span></p>
+      <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 24, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, opacity: 0.85, marginTop: 2 }}>{sub}</p>}
+    </div>
+  );
+}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel>
-          <PanelHeader title="Estado de los proyectos (clic para filtrar)" />
-          <RES_ProjectStatusDonut groups={estadoGroups} total={estadoRowsForDonut.length} active={fEstado} onPick={setFEstado} />
-        </Panel>
-        <Panel>
-          <PanelHeader title="Proyectos por cliente (clic para filtrar)" />
-          <RES_ClientBars rows={estadoRowsForDonut} active={fClient} onPick={setFClient} />
-        </Panel>
-      </div>
-
-      <Panel>
-        <PanelHeader title="Avance físico vs. presupuesto ejecutado por proyecto" />
-        <RES_ProjectBars rows={filtered} onOpen={(id) => goTo("proyectos", id)} />
-      </Panel>
-
-      <Panel>
-        <PanelHeader title="Detalle por proyecto" />
-        {sorted.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
-                  <Th k="name">Proyecto</Th><Th k="client">Cliente</Th><Th k="estado">Estado</Th><Th k="start">Inicio</Th><Th k="end">Terminado</Th>
-                  <Th k="dur" right>Días</Th><Th k="avance" right>Avance</Th><Th k="presupuesto" right>Presupuesto</Th><Th k="ejecPct" right>Ejec.</Th><Th k="riesgos" right>Riesgos</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((r) => {
-                  const est = RES_ESTADOS.find((e) => e.key === r.estado);
-                  return (
-                    <tr key={r.id} onClick={() => goTo("proyectos", r.id)} className="cursor-pointer" style={{ borderTop: "1px solid var(--steel-100)" }}>
-                      <td className="py-2 pr-3 font-medium" style={{ color: "var(--text-900)" }}>{r.name}</td>
-                      <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{r.client}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap"><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999, background: est.color, marginRight: 6 }} />{est.label.replace(", sin alertas", "")}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{fdate(r.start)}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{fdate(r.end)}</td>
-                      <td className="py-2 pr-3 text-right">{r.dur === null ? "—" : r.dur}</td>
-                      <td className="py-2 pr-3 text-right">{r.avance}%</td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.presupuesto)}</td>
-                      <td className="py-2 pr-3 text-right" style={{ color: r.ejecPct - r.avance > 15 ? COLORS.red : "var(--text-900)" }}>{r.ejecPct}%</td>
-                      <td className="py-2 pr-3 text-right">{r.riesgos}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm" style={{ color: "var(--text-400)" }}>No hay proyectos con estos filtros.</p>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <KpiCard accent={gasRes < 0 ? COLORS.red : COLORS.green}>
-          <p className="kpi-number">{money(Math.abs(gasRes))}</p>
-          <p className="kpi-label">{gasRes < 0 ? "Excedente" : "Ahorro"} en órdenes (incl. mano de obra)</p>
-          <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>Gasto registrado {money(gasTot)}</p>
-        </KpiCard>
-        <KpiCard accent={otAtras.length || otSobre.length ? COLORS.red : COLORS.green}>
-          <p className="kpi-number">{otAbiertas}</p>
-          <p className="kpi-label">Órdenes de trabajo abiertas · {otAtras.length} atrasada(s) · {otSobre.length} sobre presupuesto</p>
-          <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>Presupuesto {money(otPres)} · ejecutado {money(otEjec)}</p>
-        </KpiCard>
-        <KpiCard accent={crossings.length > 0 ? COLORS.red : COLORS.green}>
-          <p className="kpi-number">{crossings.length}</p>
-          <p className="kpi-label">Cruces en el cronograma</p>
-        </KpiCard>
-        <KpiCard accent={matPendientes > 0 ? COLORS.amber : COLORS.green}>
-          <p className="kpi-number">{matPendientes}</p>
-          <p className="kpi-label">Proyectos con planos/materiales pendientes</p>
-        </KpiCard>
-        <KpiCard accent={actPendientes > 0 ? COLORS.amber : COLORS.green}>
-          <p className="kpi-number">{actPendientes}</p>
-          <p className="kpi-label">Documentos pendientes de firma</p>
-        </KpiCard>
-      </div>
-
-      <Panel>
-        <PanelHeader title="Puntos de atención" />
-        {alerts.length ? (
-          <ul className="space-y-2 text-sm">
-            {alerts.map((a, i) => (
-              <li key={i} style={{ color: "var(--text-900)" }}>
-                <span className="risk-pill" style={{ background: "var(--steel-100)", color: "var(--text-600)", marginRight: 8 }}>{a.mod}</span>{a.text}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm" style={{ color: "var(--text-400)" }}>No hay puntos críticos de atención por el momento.</p>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {SECTIONS.map(([key, label]) => (
-          <button key={key} onClick={() => goTo(key)} className="panel text-left p-4" style={{ cursor: "pointer" }}>
-            <p className="text-sm font-medium" style={{ color: "var(--text-900)" }}>{label}</p>
-            <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>Ir al módulo →</p>
-          </button>
-        ))}
+function V_Donut({ items, center, size }) {
+  const sz = size || 160, stroke = 24, r = (sz - stroke) / 2, c = 2 * Math.PI * r;
+  const total = items.reduce((a, i) => a + i.value, 0);
+  let off = 0;
+  return (
+    <div className="flex items-center gap-5 flex-wrap">
+      <svg width={sz} height={sz} viewBox={"0 0 " + sz + " " + sz}>
+        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="var(--steel-100)" strokeWidth={stroke} />
+        {total > 0 && items.filter((i) => i.value > 0).map((i, k) => {
+          const d = (i.value / total) * c; const el = <circle key={k} cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke={i.color} strokeWidth={stroke} strokeDasharray={d + " " + (c - d)} strokeDashoffset={-off} transform={"rotate(-90 " + sz / 2 + " " + sz / 2 + ")"}><title>{i.label + ": " + i.text}</title></circle>; off += d; return el;
+        })}
+        <text x={sz / 2} y={sz / 2 - 2} textAnchor="middle" fontSize="19" fontWeight="700" fill="var(--text-900)" fontFamily="var(--font-display)">{center && center.big}</text>
+        <text x={sz / 2} y={sz / 2 + 14} textAnchor="middle" fontSize="10" fill="var(--text-400)">{center && center.small}</text>
+      </svg>
+      <div className="space-y-1.5">
+        {items.map((i, k) => (<div key={k} className="flex items-center gap-2 text-xs"><span style={{ width: 10, height: 10, borderRadius: 3, background: i.color }} /><span style={{ color: "var(--text-900)" }}>{i.label}</span><span style={{ color: "var(--text-400)" }}>{i.text}{total > 0 ? " · " + Math.round((i.value / total) * 100) + "%" : ""}</span></div>))}
+        {total === 0 && <p className="text-xs" style={{ color: "var(--text-400)" }}>Sin datos todavía.</p>}
       </div>
     </div>
   );
 }
 
-/* ---------------------------------- barra lateral maestra ---------------------------------- */
+// Barras/área simple: data [{label, value}]
+function V_Bars({ data, color, fmt, height }) {
+  const W = 720, H = height || 200, L = 46, R = 10, T = 12, B = 26;
+  const f = fmt || ((v) => String(Math.round(v)));
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const cw = (W - L - R) / Math.max(1, data.length);
+  const bw = Math.min(34, cw * 0.62);
+  const id = "g" + (color || "x").replace("#", "");
+  return (
+    <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+      <defs><linearGradient id={id} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={color || VIV.blue} /><stop offset="1" stopColor={(color || VIV.blue) + "88"} /></linearGradient></defs>
+      {[0, 0.5, 1].map((t, i) => { const y = T + (H - T - B) * (1 - t); return <g key={i}><line x1={L} x2={W - R} y1={y} y2={y} stroke="var(--steel-100)" /><text x={L - 5} y={y + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{f(max * t)}</text></g>; })}
+      {data.map((d, i) => { const h = (H - T - B) * (d.value / max); const x = L + cw * i + (cw - bw) / 2; return (
+        <g key={i}><rect x={x} y={H - B - h} width={bw} height={Math.max(0, h)} rx="4" fill={"url(#" + id + ")"}><title>{d.label + ": " + f(d.value)}</title></rect>
+          <text x={x + bw / 2} y={H - 9} textAnchor="middle" fontSize={data.length > 16 ? 8 : 10} fill="var(--text-600)">{d.label}</text></g>); })}
+    </svg>
+  );
+}
+
+function V_Insights({ items }) {
+  return (
+    <ul className="space-y-2 text-sm">
+      {items.map((t, i) => (
+        <li key={i} className="flex gap-2 items-start" style={{ color: "var(--text-900)" }}>
+          <span style={{ width: 8, height: 8, borderRadius: 999, marginTop: 6, flexShrink: 0, background: t.tone === "bad" ? VIV.red : t.tone === "warn" ? VIV.amber : VIV.green }} />
+          <span>{t.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* ===== MODULO: ALIMENTACION ===== */
+const ALI_KINDS = [
+  { key: "almuerzo", label: "Almuerzo", short: "Alm.", color: VIV.orange, vkey: "vAlmuerzo" },
+  { key: "merienda", label: "Merienda", short: "Mer.", color: VIV.violet, vkey: "vMerienda" },
+  { key: "break", label: "Break", short: "Break", color: VIV.teal, vkey: "vBreak" },
+  { key: "representativo", label: "Gasto representativo", short: "Repres.", color: VIV.pink, vkey: "vRep" },
+];
+const ali_kind = (k) => ALI_KINDS.find((x) => x.key === k) || ALI_KINDS[0];
+const ALI_MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function ALI_personName(people, e) { const p = people.find((x) => x.id === e.personId); return p ? p.name : (e.personName || "General (sin persona)"); }
+
+function ALI_inRange(e, from, to) { return (!from || e.date >= from) && (!to || e.date <= to); }
+
+function ALI_stats(entries, people) {
+  const total = r2(entries.reduce((a, e) => a + num(e.amount), 0));
+  const byKind = ALI_KINDS.map((k) => { const l = entries.filter((e) => e.kind === k.key); return { ...k, n: l.length, total: r2(l.reduce((a, e) => a + num(e.amount), 0)) }; });
+  const pm = {}; entries.forEach((e) => { const n = ALI_personName(people, e); pm[n] = pm[n] || { n: 0, total: 0 }; pm[n].n++; pm[n].total += num(e.amount); });
+  const byPerson = Object.entries(pm).map(([label, v]) => ({ label, value: r2(v.total), n: v.n })).sort((a, b) => b.value - a.value);
+  const dm = {}; entries.forEach((e) => { dm[e.date] = (dm[e.date] || 0) + num(e.amount); });
+  const days = Object.keys(dm).sort();
+  const mm = {}; entries.forEach((e) => { const k = (e.date || "").slice(0, 7); if (k) mm[k] = (mm[k] || 0) + num(e.amount); });
+  const byMonth = Object.keys(mm).sort().map((k) => ({ key: k, label: ALI_MESES[Number(k.slice(5, 7)) - 1] + " " + k.slice(2, 4), value: r2(mm[k]) }));
+  const om = {}; entries.filter((e) => e.otId).forEach((e) => { om[e.otId] = (om[e.otId] || 0) + num(e.amount); });
+  return { total, byKind, byPerson, days, dayTotals: dm, byMonth, byOt: om, avgDay: days.length ? r2(total / days.length) : 0, n: entries.length };
+}
+
+function ALI_recs(st, people, entries) {
+  const out = [];
+  if (!st.n) return [{ tone: "warn", text: "Aún no hay registros de alimentación en este periodo." }];
+  const top = [...st.byKind].sort((a, b) => b.total - a.total)[0];
+  out.push({ tone: "good", text: `El mayor gasto es en ${top.label.toLowerCase()}: ${money(top.total)} (${st.total ? Math.round((top.total / st.total) * 100) : 0}% del total).` });
+  out.push({ tone: "good", text: `Promedio diario: ${money(st.avgDay)} en ${st.days.length} día(s) con consumo.` });
+  const rep = st.byKind.find((k) => k.key === "representativo");
+  if (rep && st.total && rep.total / st.total > 0.3) out.push({ tone: "warn", text: `Los gastos representativos pesan ${Math.round((rep.total / st.total) * 100)}% del total: conviene justificarlos con la orden o el cliente atendido.` });
+  if (st.byPerson.length > 1 && st.total && st.byPerson[0].value / st.total > 0.4) out.push({ tone: "warn", text: `${st.byPerson[0].label} concentra ${Math.round((st.byPerson[0].value / st.total) * 100)}% del gasto de alimentación.` });
+  const sinOt = entries.filter((e) => !e.otId).length;
+  if (sinOt && sinOt === entries.length) out.push({ tone: "warn", text: "Ningún registro está asignado a una orden de trabajo: asígnalos para saber qué trabajo genera el gasto." });
+  if (st.byMonth.length >= 2) { const a = st.byMonth[st.byMonth.length - 2], b = st.byMonth[st.byMonth.length - 1]; const d = b.value - a.value; out.push({ tone: d > 0 ? "warn" : "good", text: `${b.label} frente a ${a.label}: ${d > 0 ? "sube " : "baja "}${money(Math.abs(d))}.` }); }
+  return out;
+}
+
+function ALI_exportExcel(entries, people, orders) {
+  const st = ALI_stats(entries, people);
+  const ot = (id) => { const o = orders.find((x) => x.id === id); return o ? "N.º " + o.number + " " + o.name : ""; };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(entries.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => ({ Fecha: e.date, Persona: ALI_personName(people, e), Cargo: (people.find((p) => p.id === e.personId) || {}).cargo || "", Tipo: ali_kind(e.kind).label, "Valor USD": num(e.amount), Concepto: e.concept || "", "Orden de trabajo": ot(e.otId), Observaciones: e.obs || "" }))), "Registros");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byPerson.map((p) => ({ Persona: p.label, Registros: p.n, "Total USD": p.value }))), "Por persona");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byKind.map((k) => ({ Tipo: k.label, Registros: k.n, "Total USD": k.total }))), "Por tipo");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.days.map((d) => ({ Fecha: d, "Total USD": r2(st.dayTotals[d]) }))), "Por día");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byMonth.map((m) => ({ Mes: m.key, "Total USD": m.value }))), "Por mes");
+  XLSX.writeFile(wb, "alimentacion_" + todayISO() + ".xlsx");
+}
+
+function ALI_openReport(entries, people, orders, rangeLabel) {
+  const st = ALI_stats(entries, people);
+  const ot = (id) => { const o = orders.find((x) => x.id === id); return o ? "N.º " + o.number + " " + o.name : "—"; };
+  RPT_open({
+    title: "Control de alimentación", subtitle: rangeLabel,
+    kpis: [{ label: "Gasto total", value: money(st.total) }, { label: "Registros", value: String(st.n) }, { label: "Promedio diario", value: money(st.avgDay) }, ...st.byKind.map((k) => ({ label: k.label, value: money(k.total), color: k.color }))],
+    sections: [
+      { heading: "Gasto por tipo de comida", svg: RPT_barsSvg(st.byKind.map((k) => ({ label: k.label, a: k.n, b: k.total, bColor: k.color })), ["N.º de registros", "Total USD"], (v) => String(Math.round(v * 100) / 100)) },
+      { heading: "Gasto por persona", table: { head: ["Persona", "Registros", "Total"], align: ["left", "right", "right"], rows: st.byPerson.map((p) => [p.label, p.n, money(p.value)]) } },
+      { heading: "Gasto por mes", table: { head: ["Mes", "Total"], align: ["left", "right"], rows: st.byMonth.map((m) => [m.label, money(m.value)]) } },
+      { heading: "Detalle de registros", table: { head: ["Fecha", "Persona", "Tipo", "Valor", "Orden", "Observaciones"], align: ["left", "left", "left", "right", "left", "left"], rows: entries.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => [fdate(e.date), ALI_personName(people, e), ali_kind(e.kind).label, money(num(e.amount)), ot(e.otId), (e.concept ? e.concept + ". " : "") + (e.obs || "")]) } },
+      { heading: "Análisis y recomendaciones", bullets: ALI_recs(st, people, entries).map((x) => x.text) },
+    ],
+  });
+}
+
+/* ---- pestaña: control diario ---- */
+function ALI_Daily({ people, entries, setEntries }) {
+  const [date, setDate] = useState(todayISO());
+  const active = people.filter((p) => p.active !== false);
+  const day = entries.filter((e) => e.date === date);
+  const find = (pid, k) => day.find((e) => e.personId === pid && e.kind === k);
+  const toggle = (p, k) => {
+    const ex = find(p.id, k.key);
+    if (ex) setEntries((prev) => prev.filter((e) => e.id !== ex.id));
+    else setEntries((prev) => [...prev, { id: uid(), date, personId: p.id, personName: p.name, kind: k.key, amount: num(p[k.vkey]), concept: "", obs: "", otId: "" }]);
+  };
+  const markAll = (k) => setEntries((prev) => {
+    const add = active.filter((p) => !prev.some((e) => e.date === date && e.personId === p.id && e.kind === k.key)).map((p) => ({ id: uid(), date, personId: p.id, personName: p.name, kind: k.key, amount: num(p[k.vkey]), concept: "", obs: "", otId: "" }));
+    return [...prev, ...add];
+  });
+  const upd = (id, patch) => setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const dayTotal = r2(day.reduce((a, e) => a + num(e.amount), 0));
+  const shift = (n) => setDate(toISO(addDays(new Date(date + "T00:00:00"), n)));
+  return (
+    <div className="space-y-5">
+      <Panel>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button className="btn-ghost text-xs" onClick={() => shift(-1)}>← Día anterior</button>
+          <input type="date" className="field" style={{ width: 160 }} value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+          <button className="btn-ghost text-xs" onClick={() => shift(1)}>Día siguiente →</button>
+          <button className="btn-ghost text-xs" onClick={() => setDate(todayISO())}>Hoy</button>
+          <div className="flex-1" />
+          <div style={{ background: "linear-gradient(135deg," + VIV.orange + "," + VIV.pink + ")", color: "#fff", borderRadius: 12, padding: "8px 16px" }}>
+            <p style={{ fontSize: 11, opacity: 0.9 }}>Total del día · {fdate(date)}</p>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20 }}>{money(dayTotal)}</p>
+          </div>
+        </div>
+      </Panel>
+      {active.length === 0 ? (
+        <Panel><p className="text-sm" style={{ color: "var(--text-600)" }}>Primero agrega personal en la pestaña «Personal» (nombre, cargo y valor de cada tiempo de comida).</p></Panel>
+      ) : (
+        <Panel>
+          <PanelHeader title="Marca lo consumido hoy (toca para activar / quitar)" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
+                <th className="font-medium pb-2 pr-3">Persona</th>
+                {ALI_KINDS.map((k) => <th key={k.key} className="font-medium pb-2 pr-2 text-center"><span style={{ color: k.color, fontWeight: 700 }}>{k.label}</span><br /><button className="text-[11px] underline" style={{ color: "var(--text-400)" }} onClick={() => markAll(k)}>marcar a todos</button></th>)}
+                <th className="font-medium pb-2 text-right">Total</th>
+              </tr></thead>
+              <tbody>
+                {active.map((p) => {
+                  const tot = r2(day.filter((e) => e.personId === p.id).reduce((a, e) => a + num(e.amount), 0));
+                  return (
+                    <tr key={p.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                      <td className="py-2 pr-3"><span style={{ color: "var(--text-900)", fontWeight: 600 }}>{p.name}</span><div className="text-xs" style={{ color: "var(--text-400)" }}>{p.cargo}</div></td>
+                      {ALI_KINDS.map((k) => { const ex = find(p.id, k.key); return (
+                        <td key={k.key} className="py-2 pr-2 text-center">
+                          <button onClick={() => toggle(p, k)} aria-label={k.label + " " + p.name} style={{ minWidth: 78, padding: "6px 8px", borderRadius: 10, fontSize: 12, fontWeight: 700, border: "2px solid " + k.color, background: ex ? k.color : "#fff", color: ex ? "#fff" : k.color }}>
+                            {ex ? money(num(ex.amount)) : "+ " + money(num(p[k.vkey]))}
+                          </button>
+                        </td>); })}
+                      <td className="py-2 text-right font-semibold" style={{ color: "var(--text-900)" }}>{money(tot)}</td>
+                    </tr>);
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      <Panel>
+        <PanelHeader title={"Detalle del día · " + fdate(date) + " (puedes cambiar el valor y escribir observaciones)"} />
+        {day.length === 0 ? <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin registros este día.</p> : (
+          <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Persona</th><th className="font-medium pb-2 pr-3">Tipo</th><th className="font-medium pb-2 pr-3" style={{ width: 110 }}>Valor USD</th><th className="font-medium pb-2 pr-3">Observación</th><th /></tr></thead>
+            <tbody>{day.map((e) => (
+              <tr key={e.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                <td className="py-1.5 pr-3">{ALI_personName(people, e)}</td>
+                <td className="py-1.5 pr-3"><span className="risk-pill" style={{ background: ali_kind(e.kind).color + "22", color: ali_kind(e.kind).color }}>{ali_kind(e.kind).label}</span></td>
+                <td className="py-1.5 pr-3"><DecimalInput className="field" value={e.amount} onChange={(v) => upd(e.id, { amount: v })} /></td>
+                <td className="py-1.5 pr-3"><input className="field" value={e.obs || ""} onChange={(ev) => upd(e.id, { obs: ev.target.value })} placeholder="Observación…" /></td>
+                <td className="py-1.5"><button aria-label="Eliminar" onClick={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))} style={{ color: "var(--text-400)" }}><Trash2 size={13} /></button></td>
+              </tr>))}</tbody></table></div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+/* ---- pestaña: registros ---- */
+function ALI_Records({ people, entries, setEntries, orders }) {
+  const blank = () => ({ date: todayISO(), personId: "", kind: "almuerzo", amount: "", concept: "", obs: "", otId: "" });
+  const [f, setF] = useState(blank());
+  const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [fp, setFp] = useState("todos"); const [fk, setFk] = useState("todos"); const [fo, setFo] = useState("todos");
+  const [err, setErr] = useState("");
+  const person = people.find((p) => p.id === f.personId);
+  const pickDefault = (patch) => setF((x) => { const n = { ...x, ...patch }; const p = people.find((q) => q.id === n.personId); const k = ali_kind(n.kind); if (p && (patch.personId !== undefined || patch.kind !== undefined)) n.amount = String(num(p[k.vkey]) || ""); return n; });
+  const add = (ev) => {
+    ev.preventDefault();
+    if (!f.date) { setErr("Indica la fecha."); return; }
+    if (!(num(f.amount) > 0)) { setErr("Indica el valor del gasto."); return; }
+    if (!f.personId && f.kind !== "representativo") { setErr("Elige la persona (solo el gasto representativo puede ser general)."); return; }
+    setErr("");
+    setEntries((prev) => [...prev, { id: uid(), ...f, personName: person ? person.name : "", amount: num(f.amount) }]);
+    setF({ ...blank(), date: f.date, kind: f.kind, personId: f.personId });
+  };
+  const rows = entries.filter((e) => ALI_inRange(e, from, to) && (fp === "todos" || e.personId === fp) && (fk === "todos" || e.kind === fk) && (fo === "todos" || e.otId === fo)).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const tot = r2(rows.reduce((a, e) => a + num(e.amount), 0));
+  const upd = (id, patch) => setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  return (
+    <div className="space-y-5">
+      <Panel>
+        <PanelHeader title="Agregar un gasto de alimentación" />
+        <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div><label className="field-label">Fecha</label><input type="date" className="field" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div>
+          <div><label className="field-label">Persona</label><select className="field" value={f.personId} onChange={(e) => pickDefault({ personId: e.target.value })}><option value="">— General / sin persona —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          <div><label className="field-label">Tipo</label><select className="field" value={f.kind} onChange={(e) => pickDefault({ kind: e.target.value })}>{ALI_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></div>
+          <div><label className="field-label">Valor (USD)</label><DecimalInput className="field" value={f.amount} onChange={(v) => setF({ ...f, amount: v })} placeholder="0.00" /></div>
+          <div className="col-span-2"><label className="field-label">Concepto (ej. almuerzo con cliente)</label><input className="field" value={f.concept} onChange={(e) => setF({ ...f, concept: e.target.value })} /></div>
+          <div className="col-span-2"><label className="field-label">Orden de trabajo (opcional)</label><select className="field" value={f.otId} onChange={(e) => setF({ ...f, otId: e.target.value })}><option value="">— Ninguna —</option>{orders.filter((o) => o.status !== "anulada").map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name}</option>)}</select></div>
+          <div className="col-span-2 md:col-span-4"><label className="field-label">Observaciones</label><input className="field" value={f.obs} onChange={(e) => setF({ ...f, obs: e.target.value })} /></div>
+          <div className="col-span-2 md:col-span-4 flex items-center gap-3"><button type="submit" className="btn-primary">Guardar gasto</button>{err && <span className="text-sm" style={{ color: COLORS.red }}>{err}</span>}</div>
+        </form>
+      </Panel>
+      <Panel>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <div><label className="field-label">Desde</label><input type="date" className="field" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+          <div><label className="field-label">Hasta</label><input type="date" className="field" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div><label className="field-label">Persona</label><select className="field" value={fp} onChange={(e) => setFp(e.target.value)}><option value="todos">Todas</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          <div><label className="field-label">Tipo</label><select className="field" value={fk} onChange={(e) => setFk(e.target.value)}><option value="todos">Todos</option>{ALI_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></div>
+          <div><label className="field-label">Orden</label><select className="field" value={fo} onChange={(e) => setFo(e.target.value)}><option value="todos">Todas</option>{orders.map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name}</option>)}</select></div>
+        </div>
+        <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>{rows.length} registro(s) · total <strong>{money(tot)}</strong></p>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Fecha</th><th className="font-medium pb-2 pr-3">Persona</th><th className="font-medium pb-2 pr-3">Tipo</th><th className="font-medium pb-2 pr-3" style={{ width: 110 }}>Valor</th><th className="font-medium pb-2 pr-3">Concepto / observación</th><th /></tr></thead>
+          <tbody>
+            {rows.slice(0, 300).map((e) => (
+              <tr key={e.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                <td className="py-1.5 pr-3 whitespace-nowrap"><input type="date" className="field" style={{ width: 138 }} value={e.date} onChange={(ev) => ev.target.value && upd(e.id, { date: ev.target.value })} /></td>
+                <td className="py-1.5 pr-3">{ALI_personName(people, e)}</td>
+                <td className="py-1.5 pr-3"><span className="risk-pill" style={{ background: ali_kind(e.kind).color + "22", color: ali_kind(e.kind).color }}>{ali_kind(e.kind).label}</span></td>
+                <td className="py-1.5 pr-3"><DecimalInput className="field" value={e.amount} onChange={(v) => upd(e.id, { amount: v })} /></td>
+                <td className="py-1.5 pr-3"><input className="field" value={e.obs || ""} onChange={(ev) => upd(e.id, { obs: ev.target.value })} placeholder={e.concept || "Observación…"} /></td>
+                <td className="py-1.5"><button aria-label="Eliminar" onClick={() => setEntries((prev) => prev.filter((x) => x.id !== e.id))} style={{ color: "var(--text-400)" }}><Trash2 size={13} /></button></td>
+              </tr>))}
+            {rows.length === 0 && <tr><td colSpan={6} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin registros con estos filtros.</td></tr>}
+          </tbody></table></div>
+      </Panel>
+    </div>
+  );
+}
+
+/* ---- pestaña: personal ---- */
+function ALI_People({ people, setPeople }) {
+  const blank = { name: "", cargo: "", vAlmuerzo: "", vMerienda: "", vBreak: "", vRep: "" };
+  const [f, setF] = useState(blank);
+  const add = (ev) => { ev.preventDefault(); if (!f.name.trim()) return; setPeople((prev) => [...prev, { id: uid(), active: true, ...f, name: f.name.trim(), vAlmuerzo: num(f.vAlmuerzo), vMerienda: num(f.vMerienda), vBreak: num(f.vBreak), vRep: num(f.vRep) }]); setF(blank); };
+  const upd = (id, patch) => setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const [conf, setConf] = useState(null);
+  return (
+    <div className="space-y-5">
+      <Panel>
+        <PanelHeader title="Agregar trabajador" />
+        <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="col-span-2"><label className="field-label">Nombre</label><input className="field" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Nombre y apellido" /></div>
+          <div className="col-span-2"><label className="field-label">Cargo</label><input className="field" value={f.cargo} onChange={(e) => setF({ ...f, cargo: e.target.value })} placeholder="Ej. Soldador" /></div>
+          <div className="col-span-2 md:col-span-2 hidden md:block" />
+          <div><label className="field-label">Valor almuerzo</label><DecimalInput className="field" value={f.vAlmuerzo} onChange={(v) => setF({ ...f, vAlmuerzo: v })} placeholder="0.00" /></div>
+          <div><label className="field-label">Valor merienda</label><DecimalInput className="field" value={f.vMerienda} onChange={(v) => setF({ ...f, vMerienda: v })} placeholder="0.00" /></div>
+          <div><label className="field-label">Valor break</label><DecimalInput className="field" value={f.vBreak} onChange={(v) => setF({ ...f, vBreak: v })} placeholder="0.00" /></div>
+          <div><label className="field-label">Gasto representativo</label><DecimalInput className="field" value={f.vRep} onChange={(v) => setF({ ...f, vRep: v })} placeholder="0.00" /></div>
+          <div className="flex items-end"><button type="submit" className="btn-primary w-full">Agregar</button></div>
+        </form>
+      </Panel>
+      <Panel>
+        <PanelHeader title={"Personal registrado (" + people.length + ")"} />
+        <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Los valores son los predeterminados de cada tiempo de comida; al marcar el día se usan automáticamente y puedes cambiarlos en cada registro. Cambiar un valor aquí no modifica registros ya guardados.</p>
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-2">Activo</th><th className="font-medium pb-2 pr-2">Nombre</th><th className="font-medium pb-2 pr-2">Cargo</th>{ALI_KINDS.map((k) => <th key={k.key} className="font-medium pb-2 pr-2" style={{ color: k.color }}>{k.label}</th>)}<th /></tr></thead>
+          <tbody>
+            {people.map((p) => (
+              <tr key={p.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                <td className="py-1.5 pr-2"><input type="checkbox" checked={p.active !== false} onChange={(e) => upd(p.id, { active: e.target.checked })} /></td>
+                <td className="py-1.5 pr-2"><input className="field" value={p.name} onChange={(e) => upd(p.id, { name: e.target.value })} /></td>
+                <td className="py-1.5 pr-2"><input className="field" value={p.cargo || ""} onChange={(e) => upd(p.id, { cargo: e.target.value })} /></td>
+                {ALI_KINDS.map((k) => <td key={k.key} className="py-1.5 pr-2" style={{ width: 96 }}><DecimalInput className="field" value={p[k.vkey]} onChange={(v) => upd(p.id, { [k.vkey]: v })} /></td>)}
+                <td className="py-1.5 whitespace-nowrap">{conf === p.id ? <span className="text-xs"><button style={{ color: COLORS.red }} onClick={() => { setPeople((prev) => prev.filter((x) => x.id !== p.id)); setConf(null); }}>Eliminar</button> · <button onClick={() => setConf(null)}>Cancelar</button></span> : <button aria-label="Eliminar" onClick={() => setConf(p.id)} style={{ color: "var(--text-400)" }}><Trash2 size={13} /></button>}</td>
+              </tr>))}
+            {people.length === 0 && <tr><td colSpan={8} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Aún no hay personal. Agrega a tus trabajadores arriba.</td></tr>}
+          </tbody></table></div>
+      </Panel>
+    </div>
+  );
+}
+
+/* ---- pestaña: resumen / graficos ---- */
+function ALI_Summary({ people, entries, orders }) {
+  const now = new Date();
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [month, setMonth] = useState("todos");
+  const years = [...new Set([String(now.getFullYear()), ...entries.map((e) => (e.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
+  const list = entries.filter((e) => (year === "todos" || (e.date || "").slice(0, 4) === year) && (month === "todos" || Number((e.date || "").slice(5, 7)) === Number(month)));
+  const st = ALI_stats(list, people);
+  const today = r2(entries.filter((e) => e.date === todayISO()).reduce((a, e) => a + num(e.amount), 0));
+  const trend = month === "todos"
+    ? ALI_MESES.map((l, i) => ({ label: l, value: r2(list.filter((e) => Number((e.date || "").slice(5, 7)) === i + 1).reduce((a, e) => a + num(e.amount), 0)) }))
+    : st.days.map((d) => ({ label: d.slice(8), value: r2(st.dayTotals[d]) }));
+  const otItems = Object.entries(st.byOt).map(([id, v]) => { const o = orders.find((x) => x.id === id); return { label: o ? "N.º " + o.number + " " + o.name : "Orden eliminada", value: r2(v), color: VIV.blue }; }).sort((a, b) => b.value - a.value);
+  const label = (month === "todos" ? "Año " + year : RES_MESES_LARGO[Number(month) - 1] + " " + year);
+  return (
+    <div className="space-y-5">
+      <Panel>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div><label className="field-label">Año</label><select className="field" value={year} onChange={(e) => setYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+          <div><label className="field-label">Mes</label><select className="field" value={month} onChange={(e) => setMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+          <div className="flex-1" />
+          <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => ALI_openReport(list, people, orders, label)}><Printer size={14} />Informe gerencial</button>
+          <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => ALI_exportExcel(list, people, orders)}><Download size={14} />Excel</button>
+        </div>
+      </Panel>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <VStat color={VIV.orange} label={"Gasto " + label} value={money(st.total)} sub={st.n + " registros"} />
+        <VStat color={VIV.blue} label="Gasto de hoy" value={money(today)} sub={fdate(todayISO())} />
+        <VStat color={VIV.teal} label="Promedio por día" value={money(st.avgDay)} sub={st.days.length + " día(s) con consumo"} />
+        <VStat color={VIV.pink} label="Gastos representativos" value={money((st.byKind.find((k) => k.key === "representativo") || {}).total || 0)} sub="del periodo" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel><PanelHeader title="Gasto por tipo de comida" /><V_Donut items={st.byKind.map((k) => ({ label: k.label, value: k.total, color: k.color, text: money(k.total) }))} center={{ big: money(st.total), small: "total" }} /></Panel>
+        <Panel><PanelHeader title={month === "todos" ? "Gasto por mes · " + (year === "todos" ? "todos los años" : year) : "Gasto por día · " + label} /><V_Bars data={trend} color={VIV.orange} fmt={(v) => "$" + Math.round(v)} /></Panel>
+        <Panel><PanelHeader title="Gasto por persona" /><OT_HBars items={st.byPerson.map((p, i) => ({ label: p.label, value: p.value, sub: p.n + " reg.", color: VIV_LIST[i % VIV_LIST.length] }))} fmt={money} max={10} /></Panel>
+        <Panel><PanelHeader title="Gasto asignado a órdenes de trabajo" />{otItems.length ? <OT_HBars items={otItems} fmt={money} /> : <p className="text-sm" style={{ color: "var(--text-400)" }}>Ningún registro está ligado a una orden de trabajo.</p>}</Panel>
+      </div>
+      <Panel><PanelHeader title="Análisis gerencial" /><V_Insights items={ALI_recs(st, people, list)} /></Panel>
+    </div>
+  );
+}
+
+function ALI_Module({ data, setPeople, setEntries, orders }) {
+  const [tab, setTab] = useState("resumen");
+  return (
+    <div className="space-y-6">
+      <ModuleBanner title="Alimentación" subtitle="Almuerzos, meriendas, breaks y gastos representativos · control diario" from="#B45309" to={VIV.orange} />
+      <SubTabs tabs={[["resumen", "Resumen y gráficos"], ["diario", "Control diario"], ["registros", "Registros"], ["personal", "Personal"]]} active={tab} onChange={setTab} />
+      {tab === "resumen" ? <ALI_Summary people={data.people} entries={data.entries} orders={orders} />
+        : tab === "diario" ? <ALI_Daily people={data.people} entries={data.entries} setEntries={setEntries} />
+        : tab === "registros" ? <ALI_Records people={data.people} entries={data.entries} setEntries={setEntries} orders={orders} />
+        : <ALI_People people={data.people} setPeople={setPeople} />}
+    </div>
+  );
+}
+
+/* ===== MODULO: RESUMEN GENERAL (vista gerencial) ===== */
+function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali, goTo }) {
+  const now = new Date();
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [month, setMonth] = useState("todos");
+  const [fEstado, setFEstado] = useState("todos");
+  const [fClient, setFClient] = useState("todos");
+
+  const allRows = useMemo(() => OT_buildRows(orders).filter((r) => r.status !== "anulada"), [orders]);
+  const years = useMemo(() => [...new Set([String(now.getFullYear()), ...allRows.map((r) => r.issue.slice(0, 4)).filter(Boolean)])].sort().reverse(), [allRows]);
+  const clients = useMemo(() => [...new Set(allRows.map((r) => r.client))].sort(), [allRows]);
+  const inPeriod = (iso) => !!iso && (year === "todos" || iso.slice(0, 4) === year) && (month === "todos" || Number(iso.slice(5, 7)) === Number(month));
+  const rows = allRows.filter((r) => inPeriod(r.issue) && (fEstado === "todos" || r.status === fEstado) && (fClient === "todos" || r.client === fClient));
+  const ids = new Set(rows.map((r) => r.id));
+  const label = (month === "todos" ? (year === "todos" ? "Todos los periodos" : "Año " + year) : RES_MESES_LARGO[Number(month) - 1] + " " + year);
+
+  const cnt = (k) => rows.filter((r) => r.status === k).length;
+  const totB = r2(rows.reduce((a, r) => a + r.budget, 0));
+  const totA = r2(rows.reduce((a, r) => a + r.actual, 0));
+  const res = r2(totB - totA);
+  const mat = r2(rows.reduce((a, r) => a + num(r.raw.actualMaterials), 0));
+  const trn = r2(rows.reduce((a, r) => a + num(r.raw.actualTransport), 0));
+  const mo = r2(rows.reduce((a, r) => a + num(r.raw.budgetLabor), 0));
+  const late = rows.filter((r) => r.late).length;
+  const over = rows.filter((r) => r.over).length;
+  const done = rows.filter((r) => r.onTime !== null);
+  const onTimePct = done.length ? Math.round((done.filter((r) => r.onTime).length / done.length) * 100) : null;
+  const aliEntries = (ali.entries || []).filter((e) => inPeriod(e.date));
+  const aliSt = ALI_stats(aliEntries, ali.people || []);
+  const gasto = (expenses || []).filter((e) => ids.has(e.otId));
+
+  const estadoItems = OT_ESTADOS.filter((e) => e.key !== "anulada").map((e) => ({ label: e.label, value: cnt(e.key), color: e.color, text: String(cnt(e.key)) }));
+  const chartYear = year === "todos" ? now.getFullYear() : Number(year);
+  const monthly = RES_MESES.map((l, i) => {
+    const l2 = allRows.filter((r) => r.issue && Number(r.issue.slice(0, 4)) === chartYear && Number(r.issue.slice(5, 7)) === i + 1 && (fEstado === "todos" || r.status === fEstado) && (fClient === "todos" || r.client === fClient));
+    return { label: l, m: i + 1, a: r2(l2.reduce((s, r) => s + r.budget, 0)), b: r2(l2.reduce((s, r) => s + r.actual, 0)), mat: r2(l2.reduce((s, r) => s + num(r.raw.actualMaterials), 0)), trn: r2(l2.reduce((s, r) => s + num(r.raw.actualTransport), 0)), n: l2.length };
+  });
+  const byClient = (() => { const m = {}; rows.forEach((r) => { m[r.client] = (m[r.client] || 0) + r.actual; }); return Object.entries(m).map(([label, value], i) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value).map((x, i) => ({ ...x, color: VIV_LIST[i % VIV_LIST.length] })); })();
+  const gasRows = GAS_orderRows(rows.map((r) => r.raw));
+
+  // analisis gerencial
+  const ins = [];
+  if (!rows.length) ins.push({ tone: "warn", text: "No hay órdenes de trabajo en este periodo. Todo nace en «Órdenes de trabajo»: crea una para ver proyectos, planos y materiales, actas y gastos." });
+  else {
+    ins.push({ tone: "good", text: `${rows.length} orden(es) de trabajo: ${cnt("planificado")} planificada(s), ${cnt("en_curso")} en curso y ${cnt("terminado")} terminada(s).` });
+    if (totB > 0) ins.push({ tone: totA > totB ? "bad" : totA > totB * 0.9 ? "warn" : "good", text: `Se ha ejecutado ${money(totA)} de ${money(totB)} presupuestado en materiales y transporte (${Math.round((totA / totB) * 100)}%). ${res >= 0 ? "Ahorro" : "Excedente"}: ${money(Math.abs(res))}.` });
+    if (mat + trn > 0) ins.push({ tone: "good", text: `El gasto real se reparte en materiales ${money(mat)} (${Math.round((mat / (mat + trn)) * 100)}%) y transporte ${money(trn)} (${Math.round((trn / (mat + trn)) * 100)}%). La mano de obra (${money(mo)} de referencia) se mantiene solo como dato.` });
+    if (over) ins.push({ tone: "bad", text: `${over} orden(es) superan su presupuesto: ${rows.filter((r) => r.over).slice(0, 3).map((r) => "N.º " + r.number).join(", ")}. Exige aprobación previa de todo gasto adicional.` });
+    if (late) ins.push({ tone: "bad", text: `${late} orden(es) atrasadas respecto a la fecha prevista de entrega.` });
+    if (onTimePct !== null) ins.push({ tone: onTimePct >= 80 ? "good" : "warn", text: `Cumplimiento de plazos en órdenes terminadas: ${onTimePct}%.` });
+    if (byClient[0] && totA > 0) ins.push({ tone: "good", text: `Mayor cliente por gasto: ${byClient[0].label} (${money(byClient[0].value)}, ${Math.round((byClient[0].value / totA) * 100)}% del total).` });
+    const sinAct = rows.filter((r) => r.status === "terminado" && !(actDocs || []).some((d) => d.otId === r.id && d.status !== "borrador")).length;
+    if (sinAct) ins.push({ tone: "warn", text: `${sinAct} orden(es) terminadas aún sin acta de entrega emitida o firmada.` });
+  }
+  if (aliSt.n) ins.push({ tone: "good", text: `Alimentación del periodo: ${money(aliSt.total)} (${aliSt.n} registros).` });
+
+  const linkInfo = (r) => {
+    const cp = (proyectos || []).find((p) => p.id === r.raw.projectId || p.otId === r.id);
+    const mt = (matProjects || []).find((p) => p.otId === r.id || p.id === r.raw.matId);
+    const ac = (actDocs || []).find((d) => d.otId === r.id);
+    return { cp, mt, ac, avance: cp ? CP_computeProgress(cp.phases || []) : null };
+  };
+
+  const openReport = () => RPT_open({
+    title: "Resumen gerencial general", subtitle: label + " · " + rows.length + " orden(es) de trabajo",
+    kpis: [
+      { label: "Órdenes", value: String(rows.length) }, { label: "Planificadas", value: String(cnt("planificado")), color: "#2563EB" }, { label: "En curso", value: String(cnt("en_curso")), color: "#F59E0B" }, { label: "Terminadas", value: String(cnt("terminado")), color: "#16A34A" },
+      { label: "Presupuesto (mat.+transp.)", value: money(totB) }, { label: "Ejecutado", value: money(totA) }, { label: res >= 0 ? "Ahorro" : "Excedente", value: money(Math.abs(res)), color: res >= 0 ? "#16A34A" : "#EF4444" }, { label: "Alimentación", value: money(aliSt.total) },
+    ],
+    sections: [
+      { heading: "Presupuesto vs. ejecutado por orden (materiales + transporte)", svg: RPT_barsSvg(rows.map((r) => ({ label: "N.º " + r.number + " " + r.name, a: r.budget, b: r.actual, bColor: r.over ? "#EF4444" : "#F59E0B" })), ["Presupuesto", "Ejecutado"], (v) => "$" + v.toFixed(0)) },
+      { heading: "Estado de cada orden en todos los módulos", table: { head: ["N.º", "Proyecto", "Estado", "Avance proyecto", "Planos", "Materiales", "Acta", "Presupuesto", "Ejecutado", "Ejec."], align: ["left", "left", "left", "right", "right", "right", "left", "right", "right", "right"],
+        rows: rows.map((r) => { const l = linkInfo(r); return [r.number, r.name, OT_estadoMeta(r.status).label, l.avance === null ? "—" : l.avance + "%", l.mt ? (l.mt.planos || []).length : "—", l.mt ? (l.mt.materials || []).length : "—", l.ac ? l.ac.number + " (" + l.ac.status + ")" : "—", money(r.budget), money(r.actual), r.execPct + "%"]; }) } },
+      { heading: "Gasto real por cliente", table: { head: ["Cliente", "Ejecutado"], align: ["left", "right"], rows: byClient.map((c) => [c.label, money(c.value)]) } },
+      { heading: "Alimentación del periodo", table: { head: ["Tipo", "Registros", "Total"], align: ["left", "right", "right"], rows: aliSt.byKind.map((k) => [k.label, k.n, money(k.total)]) } },
+      { heading: "Análisis gerencial", bullets: ins.map((x) => x.text) },
+    ],
+  });
+  const exportXlsx = () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((r) => { const l = linkInfo(r); return { "N.º": r.number, Proyecto: r.name, Cliente: r.client, Estado: OT_estadoMeta(r.status).label, "Avance proyecto %": l.avance === null ? "" : l.avance, Planos: l.mt ? (l.mt.planos || []).length : "", Materiales: l.mt ? (l.mt.materials || []).length : "", Acta: l.ac ? l.ac.number : "", "Presupuesto USD (mat.+transp.)": r.budget, "Ejecutado USD": r.actual, "Variación USD": r.variance, "Ejecución %": r.execPct, "Mano de obra USD (dato)": num(r.raw.budgetLabor) }; })), "Órdenes");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthly.map((m) => ({ Mes: m.label, Órdenes: m.n, "Presupuesto USD": m.a, "Ejecutado USD": m.b, "Materiales USD": m.mat, "Transporte USD": m.trn }))), "Por mes");
+    XLSX.writeFile(wb, "resumen_gerencial_" + todayISO() + ".xlsx");
+  };
+  const hasFilter = month !== "todos" || fEstado !== "todos" || fClient !== "todos";
+
+  return (
+    <div className="space-y-6">
+      <div style={{ background: "linear-gradient(120deg,#12203A 0%,#2563EB 60%,#7C3AED 100%)", borderRadius: 18, padding: "22px 24px", color: "#fff", boxShadow: "0 12px 30px -14px #2563EB" }}>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div style={{ background: "#fff", borderRadius: 16, padding: 7, display: "flex" }}><img src={getLogo()} alt="Logo" style={{ height: 56, width: 56, objectFit: "contain" }} /></div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <p style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700 }}>Resumen general</p>
+            <p style={{ fontSize: 13, opacity: 0.9 }}>Soluciones Industriales GAM · {label} · todo nace en las Órdenes de trabajo</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={openReport} className="flex items-center gap-2 text-xs font-semibold" style={{ background: "#fff", color: "#12203A", borderRadius: 10, padding: "9px 14px" }}><Printer size={14} />Informe gerencial</button>
+            <button onClick={exportXlsx} className="flex items-center gap-2 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.18)", color: "#fff", borderRadius: 10, padding: "9px 14px", border: "1px solid rgba(255,255,255,0.4)" }}><Download size={14} />Excel</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+          <div><label style={{ fontSize: 11, opacity: 0.85 }}>Año</label><select className="field" value={year} onChange={(e) => setYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+          <div><label style={{ fontSize: 11, opacity: 0.85 }}>Mes</label><select className="field" value={month} onChange={(e) => setMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+          <div><label style={{ fontSize: 11, opacity: 0.85 }}>Estado del trabajo</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option>{OT_ESTADOS.filter((e) => e.key !== "anulada").map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select></div>
+          <div><label style={{ fontSize: 11, opacity: 0.85 }}>Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+        </div>
+        {hasFilter && <button className="text-xs underline mt-2" style={{ color: "#fff" }} onClick={() => { setMonth("todos"); setFEstado("todos"); setFClient("todos"); }}>Quitar filtros</button>}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <VStat color="#12203A" label="Órdenes de trabajo" value={rows.length} sub={late ? late + " atrasada(s)" : "sin atrasos"} />
+        <VStat color={VIV.blue} label="Planificadas" value={cnt("planificado")} sub="por iniciar" />
+        <VStat color={VIV.amber} label="En curso" value={cnt("en_curso")} sub="en ejecución" />
+        <VStat color={VIV.green} label="Terminadas" value={cnt("terminado")} sub={onTimePct === null ? "—" : onTimePct + "% a tiempo"} />
+        <VStat color={VIV.violet} label="Presupuesto (mat.+transp.)" value={money(totB)} sub={rows.length ? "ticket medio " + money(totB / rows.length) : ""} />
+        <VStat color={VIV.teal} label="Ejecutado" value={money(totA)} sub={totB ? Math.round((totA / totB) * 100) + "% del presupuesto" : ""} />
+        <VStat color={res >= 0 ? VIV.green : VIV.red} label={res >= 0 ? "Ahorro" : "Excedente"} value={money(Math.abs(res))} sub={over + " orden(es) sobre presupuesto"} />
+        <VStat color={VIV.orange} label="Alimentación" value={money(aliSt.total)} sub={aliSt.n + " registros"} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel><PanelHeader title="Estado de las órdenes" /><V_Donut items={estadoItems} center={{ big: String(rows.length), small: "órdenes" }} /></Panel>
+        <Panel><PanelHeader title={"Presupuesto vs. ejecutado por mes · " + chartYear + " (clic en un mes para filtrar)"} /><OT_GroupedBars data={monthly} colors={[VIV.blue, VIV.orange]} names={["Presupuesto", "Ejecutado"]} fmt={(v) => "$" + Math.round(v)} selected={month === "todos" ? null : Number(month)} onPick={(m) => setMonth(m === "todos" ? "todos" : String(m))} /></Panel>
+        <Panel><PanelHeader title={"Materiales vs. transporte por mes · " + chartYear} /><OT_GroupedBars data={monthly.map((m) => ({ ...m, a: m.mat, b: m.trn }))} colors={[VIV.teal, VIV.pink]} names={["Materiales", "Transporte"]} fmt={(v) => "$" + Math.round(v)} /></Panel>
+        <Panel><PanelHeader title="Gasto real por cliente" /><OT_HBars items={byClient} fmt={money} max={8} /></Panel>
+        <Panel><PanelHeader title="Ahorro / excedente por orden (materiales + transporte)" /><GAS_Diverging rows={gasRows} basis="sin" /></Panel>
+        <Panel><PanelHeader title="Alimentación por tipo" /><V_Donut items={aliSt.byKind.map((k) => ({ label: k.label, value: k.total, color: k.color, text: money(k.total) }))} center={{ big: money(aliSt.total), small: "alimentación" }} /></Panel>
+      </div>
+
+      <Panel><PanelHeader title="Análisis gerencial" /><V_Insights items={ins} /></Panel>
+
+      <Panel>
+        <PanelHeader title="Cada orden en todos los módulos (haz clic para abrirla)" />
+        <div className="overflow-x-auto"><table className="w-full text-sm">
+          <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
+            <th className="font-medium pb-2 pr-3">N.º</th><th className="font-medium pb-2 pr-3">Proyecto</th><th className="font-medium pb-2 pr-3">Estado</th><th className="font-medium pb-2 pr-3">Avance</th><th className="font-medium pb-2 pr-3">Planos</th><th className="font-medium pb-2 pr-3">Mater.</th><th className="font-medium pb-2 pr-3">Acta</th><th className="font-medium pb-2 pr-3 text-right">Presupuesto</th><th className="font-medium pb-2 pr-3 text-right">Ejecutado</th><th className="font-medium pb-2 text-right">Ejec.</th>
+          </tr></thead>
+          <tbody>
+            {[...rows].sort((a, b) => b.number - a.number).map((r) => { const l = linkInfo(r); const em = OT_estadoMeta(r.status); return (
+              <tr key={r.id} className="cursor-pointer" style={{ borderTop: "1px solid var(--steel-100)" }} onClick={() => goTo("ordenes", r.id)}>
+                <td className="py-2 pr-3 font-semibold">{r.number}</td>
+                <td className="py-2 pr-3" style={{ color: "var(--text-900)" }}>{r.name}<div className="text-xs" style={{ color: "var(--text-400)" }}>{r.client}</div></td>
+                <td className="py-2 pr-3"><span className="risk-pill" style={{ background: em.color + "22", color: em.color, fontWeight: 700 }}>{em.label}</span></td>
+                <td className="py-2 pr-3" style={{ minWidth: 90 }}>{l.avance === null ? "—" : <div><div style={{ height: 6, borderRadius: 999, background: "var(--steel-100)" }}><div style={{ height: "100%", width: l.avance + "%", background: em.color, borderRadius: 999 }} /></div><span className="text-xs">{l.avance}%</span></div>}</td>
+                <td className="py-2 pr-3">{l.mt ? (l.mt.planos || []).length : "—"}</td>
+                <td className="py-2 pr-3">{l.mt ? (l.mt.materials || []).length : "—"}</td>
+                <td className="py-2 pr-3 whitespace-nowrap">{l.ac ? l.ac.number : "—"}</td>
+                <td className="py-2 pr-3 text-right whitespace-nowrap">{money(r.budget)}</td>
+                <td className="py-2 pr-3 text-right whitespace-nowrap" style={{ color: r.over ? COLORS.red : "var(--text-900)" }}>{money(r.actual)}</td>
+                <td className="py-2 text-right" style={{ color: r.over ? COLORS.red : "var(--text-900)", fontWeight: 600 }}>{r.execPct}%</td>
+              </tr>); })}
+            {rows.length === 0 && <tr><td colSpan={10} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin órdenes con estos filtros.</td></tr>}
+          </tbody></table></div>
+      </Panel>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[["proyectos", "Control de proyectos", VIV.blue, (proyectos || []).length + " proyecto(s)"], ["materiales", "Planos y materiales", VIV.teal, (matProjects || []).length + " proyecto(s)"], ["actas", "Actas", VIV.violet, (actDocs || []).filter((d) => d.docType !== "orden").length + " acta(s)"], ["gastos", "Control de gasto GAM", VIV.orange, (expenses || []).length + " gasto(s)"], ["ordenes", "Órdenes de trabajo", VIV.navy, allRows.length + " orden(es)"], ["alimentacion", "Alimentación", VIV.pink, (ali.entries || []).length + " registro(s)"]].map(([k, t, c, sub]) => (
+          <button key={k} onClick={() => goTo(k)} className="text-left" style={{ background: "#fff", border: "1px solid var(--steel-200)", borderTop: "4px solid " + c, borderRadius: 12, padding: "12px 14px", cursor: "pointer" }}>
+            <p className="text-sm font-semibold" style={{ color: "var(--text-900)", fontFamily: "var(--font-display)" }}>{t}</p>
+            <p className="text-xs" style={{ color: "var(--text-400)" }}>{sub}</p>
+          </button>))}
+      </div>
+    </div>
+  );
+}
 
 function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefreshAll, onOpenSettings }) {
   const SECTIONS = [
-    ["resumen", "Resumen general"],
-    ["proyectos", "Control de proyectos"],
-    ["calendario", "Calendario"],
-    ["materiales", "Planos y materiales"],
-    ["actas", "Actas y órdenes"],
-    ["ordenes", "Órdenes de trabajo"],
-    ["gastos", "Control de gasto GAM"],
-    ["caja", "Caja chica"],
+    ["resumen", "Resumen general", "#2563EB"],
+    ["ordenes", "Órdenes de trabajo", "#FF7A00"],
+    ["proyectos", "Control de proyectos", "#0EA5A4"],
+    ["materiales", "Planos y materiales", "#7C3AED"],
+    ["actas", "Actas", "#EC4899"],
+    ["gastos", "Control de gasto GAM", "#16A34A"],
+    ["alimentacion", "Alimentación", "#F59E0B"],
   ];
   return (
     <Fragment>
       {open && <div className="fixed inset-0 z-30 sm:hidden no-print" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} />}
-      <aside className={"fixed sm:static inset-y-0 left-0 z-40 w-72 shrink-0 flex flex-col transform transition-transform duration-200 sm:transform-none no-print " + (open ? "translate-x-0" : "-translate-x-full")} style={{ background: "var(--ink-900)" }}>
+      <aside className={"fixed sm:static inset-y-0 left-0 z-40 w-72 shrink-0 flex flex-col transform transition-transform duration-200 sm:transform-none no-print " + (open ? "translate-x-0" : "-translate-x-full")} style={{ background: "linear-gradient(180deg,#0B1530 0%,#12203A 55%,#1E3A8A 100%)" }}>
         <div className="px-5 pt-6 pb-4" style={{ paddingTop: "calc(1.5rem + env(safe-area-inset-top))" }}>
           <div className="flex items-center gap-3 mb-3">
             <div style={{ background: "#fff", borderRadius: 10, padding: 5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -5366,14 +5606,14 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
             </div>
             <div className="min-w-0">
               <h1 className="text-sm font-semibold leading-tight truncate" style={{ fontFamily: "var(--font-display)", color: "#fff" }}>Soluciones Industriales GAM</h1>
-              <p className="text-xs" style={{ color: "var(--ink-sub)" }}>Panel gerencial</p>
+              <p className="text-xs" style={{ color: "#F59E0B", fontWeight: 600 }}>Panel gerencial</p>
             </div>
           </div>
           <p className="text-xs" style={{ color: "var(--ink-sub)" }}>Todos los módulos en un solo lugar</p>
         </div>
         <nav className="px-3 space-y-1">
-          {SECTIONS.map(([key, label]) => (
-            <button key={key} onClick={() => { setSection(key); onClose && onClose(); }} className="w-full text-left px-3 py-2 rounded text-sm" style={{ background: section === key ? "var(--ink-800)" : "transparent", color: section === key ? "#fff" : "var(--ink-sub)" }}>
+          {SECTIONS.map(([key, label, dot]) => (
+            <button key={key} onClick={() => { setSection(key); onClose && onClose(); }} className="w-full text-left px-3 py-2 rounded text-sm" style={{ background: section === key ? "linear-gradient(90deg," + dot + "55," + dot + "11)" : "transparent", color: section === key ? "#fff" : "rgba(255,255,255,0.75)", borderLeft: "4px solid " + (section === key ? dot : dot + "66"), fontWeight: section === key ? 600 : 400 }}>
               {label}
             </button>
           ))}
@@ -5404,20 +5644,18 @@ function App() {
   const [focusProjectId, setFocusProjectId] = useState(null);
   const [otNewRequest, setOtNewRequest] = useState(false);
   const [gasFocus, setGasFocus] = useState(null);
+  const [otFocus, setOtFocus] = useState(null);
 
   const proyectosSync = useDatasetSync("Proyectos", [], (arr) => arr, (state) => state);
-  const calSync = useDatasetSync("Calendario", { items: [], risks: [] },
-    (arr) => { const r = arr[0] || {}; return { items: r.items || [], risks: r.risks || [] }; },
-    (state) => [{ id: "calendario", name: "Calendario de proyectos", client: "", type: "", items: state.items, risks: state.risks }]);
   const matSync = useDatasetSync("Documentacion", { projects: [], visits: [] },
     (arr) => { const r = arr[0] || {}; return { projects: r.projects || [], visits: r.visits || [] }; },
     (state) => [{ id: "documentacion", name: "Planos y materiales", client: "", type: "", projects: state.projects, visits: state.visits }]);
   const actSync = useDatasetSync("ActasOrdenes", { docs: [] },
     (arr) => { const r = arr[0] || {}; return { docs: r.docs || [] }; },
     (state) => [{ id: "actas-ordenes", name: "Actas y órdenes", client: "", type: "", docs: state.docs }]);
-  const cajaSync = useDatasetSync("CajaChica", { funds: [], expenses: [] },
-    (arr) => { const r = arr[0] || {}; return { funds: r.funds || [], expenses: r.expenses || [] }; },
-    (state) => [{ id: "caja-chica", name: "Caja chica", client: "", type: "", funds: state.funds, expenses: state.expenses }]);
+  const aliSync = useDatasetSync("Alimentacion", { people: [], entries: [] },
+    (arr) => { const r = arr[0] || {}; return { people: r.people || [], entries: r.entries || [] }; },
+    (state) => [{ id: "alimentacion", name: "Alimentación", client: "", type: "", people: state.people, entries: state.entries }]);
 
   const otSync = useDatasetSync("OrdenesTrabajo", [], (arr) => arr, (state) => state.map((o) => ({ ...o, type: "Orden de trabajo" })));
   const gasSync = useDatasetSync("GastosOT", [], (arr) => arr, (state) => state.map((e) => ({ ...e, name: e.concept || "Gasto", type: e.category })));
@@ -5425,7 +5663,7 @@ function App() {
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload();
+        proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -5433,8 +5671,8 @@ function App() {
     // eslint-disable-next-line
   }, []);
 
-  const allLoaded = proyectosSync.loaded && calSync.loaded && matSync.loaded && actSync.loaded && cajaSync.loaded && otSync.loaded && gasSync.loaded;
-  const anyNeedsSetup = proyectosSync.needsSetup || calSync.needsSetup || matSync.needsSetup || actSync.needsSetup || cajaSync.needsSetup || otSync.needsSetup || gasSync.needsSetup;
+  const allLoaded = proyectosSync.loaded && matSync.loaded && actSync.loaded && aliSync.loaded && otSync.loaded && gasSync.loaded;
+  const anyNeedsSetup = proyectosSync.needsSetup || matSync.needsSetup || actSync.needsSetup || aliSync.needsSetup || otSync.needsSetup || gasSync.needsSetup;
 
   if (!allLoaded) {
     return <div className="w-full h-full flex items-center justify-center" style={{ color: "var(--text-400)", fontFamily: "var(--font-body)" }}>Cargando…</div>;
@@ -5451,7 +5689,7 @@ function App() {
         <SetupScreen
           initial={getSyncConfig()}
           onCancel={showSettings ? () => setShowSettings(false) : null}
-          onSave={() => { setShowSettings(false); proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload(); }}
+          onSave={() => { setShowSettings(false); proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload(); }}
         />
       </div>
     );
@@ -5461,65 +5699,85 @@ function App() {
   const setGastos = (updater) => gasSync.setState((prev) => (typeof updater === "function" ? updater(prev) : updater));
   const goGastos = (id) => { setGasFocus(id); setSection("gastos"); };
   const goNewOrder = () => { setOtNewRequest(true); setSection("ordenes"); };
-  const calStatusOf = (st) => (st === "en_ejecucion" ? "en_curso" : st === "entregada" || st === "cerrada" ? "completado" : "planificado");
-
+  // Todo nace en la Orden de trabajo: crea / actualiza el proyecto, el proyecto de planos y materiales y el acta.
+  const propagateOrder = (order) => {
+    const st = OT_normStatus(order.status);
+    order.status = st;
+    if (st === "anulada") {
+      const mark = { otStatus: "anulada" };
+      if (order.projectId) proyectosSync.setState((prev) => prev.map((p) => (p.id === order.projectId ? { ...p, ...mark } : p)));
+      if (order.matId) matSync.setState((prev) => ({ ...prev, projects: prev.projects.map((p) => (p.id === order.matId ? { ...p, ...mark } : p)) }));
+      if (order.actId) actSync.setState((prev) => ({ ...prev, docs: prev.docs.map((d) => (d.id === order.actId ? { ...d, ...mark } : d)) }));
+      return order;
+    }
+    const start = order.plannedStart || todayISO();
+    const end = order.plannedEnd && order.plannedEnd >= start ? order.plannedEnd : toISO(addDays(new Date(start + "T00:00:00"), 14));
+    const budget = OT_calc(order).budget;
+    const done = st === "terminado";
+    const projectId = order.projectId || uid();
+    const sameName = matSync.state.projects.find((p) => !p.otId && (p.name || "").trim().toLowerCase() === (order.name || "").trim().toLowerCase());
+    const matId = order.matId || (sameName ? sameName.id : uid());
+    const actId = order.actId || uid();
+    order.projectId = projectId; order.matId = matId; order.actId = actId;
+    const common = { otId: order.id, otNumber: order.number, otStatus: st };
+    proyectosSync.setState((prev) => {
+      const base = prev.find((p) => p.id === projectId);
+      if (!base) {
+        const np = { id: projectId, name: order.name, client: order.client, type: "Orden de trabajo", manager: order.coordinator || "", notes: "", startDate: start, ctrlStart: start, ctrlEnd: done ? (order.realEnd || todayISO()) : "",
+          phases: CP_reschedulePhases(CP_buildPhases(start, 20, budget), start, end, budget), risks: [], milestones: [], ...common };
+        if (done) { np.phases = np.phases.map((ph) => ({ ...ph, status: "completado", progress: 100 })); np.otAutoDone = true; }
+        return [np, ...prev];
+      }
+      return prev.map((p) => {
+        if (p.id !== projectId) return p;
+        let phases = CP_reschedulePhases(p.phases, start, end, budget);
+        let otAutoDone = p.otAutoDone;
+        if (done && !CP_isProjectComplete(p)) { phases = phases.map((ph) => ({ ...ph, status: "completado", progress: 100, actualEnd: ph.actualEnd || order.realEnd || todayISO() })); otAutoDone = true; }
+        if (!done && p.otAutoDone) { phases = phases.map((ph) => ({ ...ph, status: "pendiente", progress: 0 })); otAutoDone = false; }
+        return { ...p, name: order.name, client: order.client || p.client, manager: order.coordinator || p.manager, startDate: start, ctrlStart: start, ctrlEnd: done ? (order.realEnd || p.ctrlEnd || todayISO()) : "", phases, otAutoDone, ...common };
+      });
+    });
+    matSync.setState((prev) => {
+      const ex = prev.projects.find((p) => p.id === matId);
+      if (!ex) {
+        const np = { id: matId, name: order.name, client: order.client || "", manager: order.coordinator || "", notes: "", startDate: start, endDate: end, planosDueDate: start, materialesDueDate: start, planos: [], materials: [], ...common };
+        return { ...prev, projects: [np, ...prev.projects] };
+      }
+      return { ...prev, projects: prev.projects.map((p) => (p.id === matId ? { ...p, name: order.name, client: order.client || p.client, manager: order.coordinator || p.manager, startDate: start, endDate: end, ...common } : p)) };
+    });
+    actSync.setState((prev) => {
+      const ex = prev.docs.find((d) => d.id === actId);
+      if (!ex) {
+        const nd = { id: actId, docType: "acta", number: ACT_nextNumber(prev.docs, "acta"), client: order.client || "", clientContact: "", workType: "", responsible: order.coordinator || "", date: todayISO(), startDate: start, endDate: end,
+          description: "OT N.º " + order.number + " · " + order.name + (order.description ? "\n" + order.description : ""), items: [], observations: "", internalNotes: "", status: "borrador", ...common };
+        return { ...prev, docs: [nd, ...prev.docs] };
+      }
+      return { ...prev, docs: prev.docs.map((d) => (d.id === actId ? { ...d, client: order.client || d.client, responsible: d.responsible || order.coordinator || "", startDate: start, endDate: done ? (order.realEnd || end) : end, ...common } : d)) };
+    });
+    return order;
+  };
   const saveOrder = (o) => {
     const order = { ...o };
     if (order._exp) { const raw = otSync.state.find((x) => x.id === order.id) || {}; ["actualMaterials", "actualTransport", "actualLabor", "actualOthers"].forEach((k) => { order[k] = raw[k] === undefined ? "" : raw[k]; }); }
-    delete order._exp; delete order._expCount;
-    const live = order.status !== "borrador" && order.status !== "anulada" && order.plannedStart && order.plannedEnd;
-    if (live) {
-      const start = order.plannedStart, end = order.plannedEnd;
-      const budget = OT_calc(order).budget;
-      const terminal = order.status === "entregada" || order.status === "cerrada";
-      const projectId = order.projectId || uid();
-      const calId = order.calItemId || uid();
-      order.projectId = projectId; order.calItemId = calId;
-      proyectosSync.setState((prev) => {
-        const base = prev.find((p) => p.id === projectId);
-        if (!base) {
-          const np = { id: projectId, name: order.name, client: order.client, type: "Orden de trabajo", manager: order.coordinator || "", notes: "", startDate: start, ctrlStart: start, ctrlEnd: terminal ? (order.realEnd || todayISO()) : "", otId: order.id, otNumber: order.number,
-            phases: CP_reschedulePhases(CP_buildPhases(start, 20, budget), start, end, budget), risks: [], milestones: [] };
-          return [np, ...prev];
-        }
-        return prev.map((p) => p.id !== projectId ? p : { ...p, name: order.name, client: order.client || p.client, manager: order.coordinator || p.manager, startDate: start, ctrlStart: start,
-          ctrlEnd: terminal ? (order.realEnd || p.ctrlEnd || todayISO()) : "", otId: order.id, otNumber: order.number, phases: CP_reschedulePhases(p.phases, start, end, budget) });
-      });
-      calSync.setState((prev) => {
-        const fields = { name: order.name, client: order.client || "", resource: order.resource || "", startDate: start, durationDays: Math.max(1, daysBetween(start, end) + 1), status: calStatusOf(order.status), otId: order.id, otNumber: order.number, projectId };
-        const exists = prev.items.some((i) => i.id === calId);
-        return { ...prev, items: exists ? prev.items.map((i) => (i.id === calId ? { ...i, ...fields } : i)) : [...prev.items, { id: calId, notes: "", color: CAL_PALETTE[prev.items.length % CAL_PALETTE.length], ...fields }] };
-      });
-    } else if (order.status === "anulada" && order.calItemId) {
-      const cid = order.calItemId;
-      calSync.setState((prev) => ({ ...prev, items: prev.items.filter((i) => i.id !== cid) }));
-      order.calItemId = "";
-    }
+    delete order._exp; delete order._expCount; delete order.laborIsReference;
+    propagateOrder(order);
     otSync.setState((prev) => (prev.some((x) => x.id === order.id) ? prev.map((x) => (x.id === order.id ? order : x)) : [order, ...prev]));
+  };
+  // Sincroniza TODAS las órdenes existentes con los demás módulos (útil para órdenes antiguas)
+  const syncAllOrders = () => {
+    const list = otEnriched.map((o) => {
+      const order = { ...o }; const raw = otSync.state.find((x) => x.id === o.id) || o;
+      if (order._exp) ["actualMaterials", "actualTransport", "actualLabor", "actualOthers"].forEach((k) => { order[k] = raw[k] === undefined ? "" : raw[k]; });
+      delete order._exp; delete order._expCount; delete order.laborIsReference;
+      return propagateOrder(order);
+    });
+    otSync.setState(() => list);
   };
   const deleteOrder = (id) => {
     otSync.setState((prev) => prev.filter((x) => x.id !== id));
-    calSync.setState((prev) => ({ ...prev, items: prev.items.map((i) => (i.otId === id ? { ...i, otId: "", otNumber: "" } : i)) }));
-    proyectosSync.setState((prev) => prev.map((p) => (p.otId === id ? { ...p, otId: "", otNumber: "" } : p)));
-  };
-  // Cambios hechos en el Calendario -> se reflejan en la orden de trabajo y en el proyecto
-  const setCalItemsLinked = (updater) => {
-    const prev = calSync.state.items;
-    const next = typeof updater === "function" ? updater(prev) : updater;
-    next.forEach((it) => {
-      if (!it.otId) return;
-      const old = prev.find((x) => x.id === it.id);
-      if (!old) return;
-      if (old.startDate === it.startDate && old.durationDays === it.durationDays && (old.resource || "") === (it.resource || "")) return;
-      const start = it.startDate, end = toISO(CAL_endDateOf(it));
-      otSync.setState((p) => p.map((o) => (o.id === it.otId ? { ...o, plannedStart: start, plannedEnd: end, authorizedDays: String(OT_workdays(start, end)), resource: it.resource || "" } : o)));
-      if (it.projectId) {
-        const ord = otSync.state.find((o) => o.id === it.otId);
-        const budget = ord ? OT_calc(ord).budget : 0;
-        proyectosSync.setState((p) => p.map((pr) => (pr.id === it.projectId ? { ...pr, startDate: start, ctrlStart: start, phases: CP_reschedulePhases(pr.phases, start, end, budget) } : pr)));
-      }
-    });
-    setCalItems(next);
+    proyectosSync.setState((prev) => prev.map((p) => (p.otId === id ? { ...p, otId: "", otNumber: "", otStatus: "" } : p)));
+    matSync.setState((prev) => ({ ...prev, projects: prev.projects.map((p) => (p.otId === id ? { ...p, otId: "", otNumber: "", otStatus: "" } : p)) }));
+    actSync.setState((prev) => ({ ...prev, docs: prev.docs.map((d) => (d.otId === id ? { ...d, otId: "", otNumber: "", otStatus: "" } : d)) }));
   };
 
   const createProyecto = (form) => {
@@ -5545,21 +5803,25 @@ function App() {
   const deleteMatProject = (id) => matSync.setState((prev) => ({ ...prev, projects: prev.projects.filter((p) => p.id !== id) }));
   const setMatVisits = (updater) => matSync.setState((prev) => ({ ...prev, visits: typeof updater === "function" ? updater(prev.visits) : updater }));
 
-  const setCalItems = (updater) => calSync.setState((prev) => ({ ...prev, items: typeof updater === "function" ? updater(prev.items) : updater }));
-  const setCalRisks = (updater) => calSync.setState((prev) => ({ ...prev, risks: typeof updater === "function" ? updater(prev.risks) : updater }));
-
   const setActDocs = (updater) => actSync.setState((prev) => ({ ...prev, docs: typeof updater === "function" ? updater(prev.docs) : updater }));
 
-  const setCajaFunds = (updater) => cajaSync.setState((prev) => ({ ...prev, funds: typeof updater === "function" ? updater(prev.funds) : updater }));
-  const setCajaExpenses = (updater) => cajaSync.setState((prev) => ({ ...prev, expenses: typeof updater === "function" ? updater(prev.expenses) : updater }));
+  const setAliPeople = (updater) => aliSync.setState((prev) => ({ ...prev, people: typeof updater === "function" ? updater(prev.people) : updater }));
+  const setAliEntries = (updater) => aliSync.setState((prev) => ({ ...prev, entries: typeof updater === "function" ? updater(prev.entries) : updater }));
 
   const setOtOrders = (updater) => otSync.setState((prev) => (typeof updater === "function" ? updater(prev) : updater));
 
-  const syncStatus = {
-    error: proyectosSync.syncError || calSync.syncError || matSync.syncError || actSync.syncError || cajaSync.syncError || otSync.syncError || gasSync.syncError,
-    last: [proyectosSync.lastSynced, calSync.lastSynced, matSync.lastSynced, actSync.lastSynced, cajaSync.lastSynced, otSync.lastSynced, gasSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
+  const BANNERS = {
+    ordenes: ["Órdenes de trabajo", "El origen de todo: lo que se crea aquí nace en Proyectos, Planos y materiales, Actas y Control de gasto", "#7C2D12", "#FF7A00"],
+    proyectos: ["Control de proyectos", "Avance, fases y semáforo de cada proyecto · nace desde la orden de trabajo", "#0F766E", "#0EA5A4"],
+    materiales: ["Planos y materiales", "Planos, listas de materiales y visitas técnicas por proyecto", "#4C1D95", "#7C3AED"],
+    actas: ["Actas", "Actas de entrega generadas desde las órdenes de trabajo", "#9D174D", "#EC4899"],
+    gastos: ["Control de gasto GAM", "Materiales y transporte contra presupuesto · la mano de obra es solo dato", "#166534", "#16A34A"],
   };
-  const refreshAll = () => { proyectosSync.reload(); calSync.reload(); matSync.reload(); actSync.reload(); cajaSync.reload(); otSync.reload(); gasSync.reload(); };
+  const syncStatus = {
+    error: proyectosSync.syncError || matSync.syncError || actSync.syncError || aliSync.syncError || otSync.syncError || gasSync.syncError,
+    last: [proyectosSync.lastSynced, matSync.lastSynced, actSync.lastSynced, aliSync.lastSynced, otSync.lastSynced, gasSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
+  };
+  const refreshAll = () => { proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload(); };
 
   return (
     <div className="app-shell">
@@ -5574,16 +5836,16 @@ function App() {
         .field{ width:100%; border:1px solid var(--steel-200); border-radius:6px; padding:7px 10px; font-size:13px; color:var(--text-900); background:#fff; }
         .field:focus{ outline:2px solid ${COLORS.amber}55; border-color:${COLORS.amber}; }
         .field-label{ font-size:11px; color:var(--text-400); display:block; margin-bottom:4px; }
-        .btn-primary{ background:var(--ink-900); color:#fff; border-radius:6px; padding:9px 16px; font-size:13px; font-weight:500; }
-        .btn-primary:hover{ background:var(--ink-800); }
+        .btn-primary{ background:linear-gradient(120deg,#12203A,#2563EB); color:#fff; border-radius:8px; padding:9px 16px; font-size:13px; font-weight:600; }
+        .btn-primary:hover{ filter:brightness(1.12); }
         .btn-ghost{ border:1px solid var(--steel-200); color:var(--text-600); border-radius:6px; padding:9px 16px; font-size:13px; background:#fff; }
         .btn-ghost:hover{ background:var(--paper); }
         .btn-new{ display:flex; align-items:center; justify-content:center; gap:6px; background:${COLORS.amber}; color:var(--ink-900); font-weight:600; font-size:13px; border-radius:6px; padding:9px 0; }
         .btn-new:hover{ background:${COLORS.amberDark}; color:#fff; }
         .side-card{ display:flex; align-items:center; gap:10px; padding:8px; border-radius:8px; border:1px solid transparent; cursor:pointer; }
         .side-card:hover{ background:var(--ink-800); }
-        .panel{ background:var(--surface); border:1px solid var(--steel-200); border-radius:8px; padding:18px; }
-        .kpi-card{ background:var(--surface); border:1px solid var(--steel-200); border-left-width:3px; border-radius:6px; padding:14px 16px; }
+        .panel{ background:var(--surface); border:1px solid var(--steel-200); border-radius:14px; padding:18px; box-shadow:0 6px 18px -12px rgba(18,32,58,0.35); }
+        .kpi-card{ background:var(--surface); border:1px solid var(--steel-200); border-left-width:5px; border-radius:12px; padding:14px 16px; box-shadow:0 4px 14px -8px rgba(18,32,58,0.35); }
         .kpi-number{ font-family:var(--font-display); font-weight:700; font-size:24px; color:var(--text-900); font-variant-numeric: tabular-nums; }
         .kpi-label{ font-size:12px; color:var(--text-400); margin-top:1px; }
         .tab-btn{ font-size:12.5px; font-weight:500; padding:6px 14px; border-radius:5px; }
@@ -5616,22 +5878,22 @@ function App() {
         </div>
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-8">
+            {BANNERS[section] && <ModuleBanner title={BANNERS[section][0]} subtitle={BANNERS[section][1]} from={BANNERS[section][2]} to={BANNERS[section][3]} />}
             {section === "resumen" ? (
-              <ResumenModule proyectos={proyectosSync.state} calItems={calSync.state.items} matProjects={matSync.state.projects} actDocs={actSync.state.docs} cajaFunds={cajaSync.state.funds} cajaExpenses={cajaSync.state.expenses} otOrders={otEnriched} goTo={(key, id) => { if (id) setFocusProjectId(id); setSection(key); }} />
+              <ResumenModule orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state}
+                goTo={(key, id) => { if (key === "ordenes" && id) setOtFocus(id); setSection(key); }} />
             ) : section === "proyectos" ? (
               <CP_Module onNewProject={goNewOrder} focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
-            ) : section === "calendario" ? (
-              <CAL_Module onNewOT={goNewOrder} items={calSync.state.items} setItems={setCalItemsLinked} risks={calSync.state.risks} setRisks={setCalRisks} cpProjects={proyectosSync.state} />
             ) : section === "materiales" ? (
-              <MAT_Module projects={matSync.state.projects} updateProject={updateMatProject} createProject={createMatProject} deleteProject={deleteMatProject} visits={matSync.state.visits} setVisits={setMatVisits} cpProjects={proyectosSync.state} />
+              <MAT_Module onNewOT={goNewOrder} projects={matSync.state.projects} updateProject={updateMatProject} createProject={createMatProject} deleteProject={deleteMatProject} visits={matSync.state.visits} setVisits={setMatVisits} cpProjects={proyectosSync.state} />
             ) : section === "actas" ? (
-              <ACT_Module docs={actSync.state.docs} setDocs={setActDocs} cpProjects={proyectosSync.state} />
+              <ACT_Module docs={actSync.state.docs} setDocs={setActDocs} cpProjects={proyectosSync.state} orders={otEnriched} />
             ) : section === "gastos" ? (
               <GAS_Module orders={otEnriched} expenses={gasSync.state} setExpenses={setGastos} focusOrderId={gasFocus} onFocusHandled={() => setGasFocus(null)} />
             ) : section === "ordenes" ? (
-              <OT_Module onOpenGastos={goGastos} orders={otEnriched} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} cpProjects={proyectosSync.state} />
+              <OT_Module onOpenGastos={goGastos} orders={otEnriched} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} onSyncAll={syncAllOrders} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} focusId={otFocus} onFocusHandled={() => setOtFocus(null)} cpProjects={proyectosSync.state} />
             ) : (
-              <CAJA_Module funds={cajaSync.state.funds} setFunds={setCajaFunds} expenses={cajaSync.state.expenses} setExpenses={setCajaExpenses} cpProjects={proyectosSync.state} />
+              <ALI_Module data={aliSync.state} setPeople={setAliPeople} setEntries={setAliEntries} orders={otEnriched} />
             )}
           </div>
         </main>
@@ -5643,6 +5905,7 @@ function App() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
+
 
 </script>
 </body>
