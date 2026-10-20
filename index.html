@@ -5595,6 +5595,8 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["gastos", "Control de gasto GAM", "#16A34A"],
     ["alimentacion", "Alimentación", "#F59E0B"],
   ];
+  const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
+  const VISIBLE = ONLY ? SECTIONS.filter((x) => x[0] === ONLY) : SECTIONS;
   return (
     <Fragment>
       {open && <div className="fixed inset-0 z-30 sm:hidden no-print" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} />}
@@ -5612,7 +5614,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
           <p className="text-xs" style={{ color: "var(--ink-sub)" }}>Todos los módulos en un solo lugar</p>
         </div>
         <nav className="px-3 space-y-1">
-          {SECTIONS.map(([key, label, dot]) => (
+          {VISIBLE.map(([key, label, dot]) => (
             <button key={key} onClick={() => { setSection(key); onClose && onClose(); }} className="w-full text-left px-3 py-2 rounded text-sm" style={{ background: section === key ? "linear-gradient(90deg," + dot + "55," + dot + "11)" : "transparent", color: section === key ? "#fff" : "rgba(255,255,255,0.75)", borderLeft: "4px solid " + (section === key ? dot : dot + "66"), fontWeight: section === key ? 600 : 400 }}>
               {label}
             </button>
@@ -5639,7 +5641,9 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
 
 function App() {
   const [showSettings, setShowSettings] = useState(false);
-  const [section, setSection] = useState("resumen");
+  const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
+  const [section, setSectionRaw] = useState(ONLY || "resumen");
+  const setSection = (k) => { if (!ONLY || k === ONLY) setSectionRaw(k); };
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusProjectId, setFocusProjectId] = useState(null);
   const [otNewRequest, setOtNewRequest] = useState(false);
