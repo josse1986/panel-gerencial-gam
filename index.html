@@ -2182,14 +2182,16 @@ function MAT_planosStats(project) {
   const total = planos.length;
   const aprobados = planos.filter((p) => p.status === "aprobado").length;
   const pct = total ? Math.round((aprobados / total) * 100) : 0;
-  return { total, aprobados, pct, completo: total > 0 && aprobados === total };
+  const entregados = planos.filter((p) => p.delivered || p.status === "aprobado").length;
+  return { total, aprobados, entregados, pct, completo: total > 0 && aprobados === total };
 }
 function MAT_materialesStats(project) {
   const mats = project.materials || [];
   const total = mats.length;
   const recibidos = mats.filter((m) => m.received).length;
   const pct = total ? Math.round((recibidos / total) * 100) : 0;
-  return { total, recibidos, pct, completo: total > 0 && recibidos === total };
+  const aprobados = mats.filter((m) => m.approved).length;
+  return { total, recibidos, aprobados, pct, completo: total > 0 && recibidos === total };
 }
 
 function MAT_planningRecommendations(projects, visits) {
@@ -2245,7 +2247,7 @@ function MAT_PlanosPanel({ project, onUpdate }) {
     setError(""); setUploading(true);
     try {
       const res = await MAT_uploadFileToServer(file);
-      const nuevo = { id: uid(), filename: file.name, url: res.url, fileId: res.fileId, uploadedAt: todayISO(), status: "borrador" };
+      const nuevo = { id: uid(), filename: file.name, url: res.url, fileId: res.fileId, uploadedAt: todayISO(), status: "borrador", delivered: false };
       onUpdate({ planos: [...planos, nuevo] });
     } catch (err) {
       setError(err.code === "not_configured" ? "Primero conecta la app con Google Sheets desde Configuración." : "No se pudo subir el archivo: " + (err.message || "revisa tu conexión e inténtalo de nuevo."));
@@ -2263,10 +2265,8 @@ function MAT_PlanosPanel({ project, onUpdate }) {
             <FileIcon size={16} color="var(--text-400)" />
             <a href={p.url} target="_blank" rel="noopener noreferrer" className="truncate flex-1" style={{ color: "var(--text-900)", textDecoration: "underline", minWidth: 100 }}>{p.filename}</a>
             <span className="text-xs" style={{ color: "var(--text-400)" }}>{fdate(p.uploadedAt)}</span>
-            <select className="field" style={{ width: 110 }} value={p.status} onChange={(e) => updatePlano(p.id, { status: e.target.value })}>
-              <option value="borrador">Borrador</option>
-              <option value="aprobado">Aprobado</option>
-            </select>
+            <label className="flex items-center gap-1 text-xs" style={{ color: p.delivered || p.status === "aprobado" ? COLORS.green : "var(--text-600)", fontWeight: 600 }}><input type="checkbox" checked={!!p.delivered || p.status === "aprobado"} disabled={p.status === "aprobado"} onChange={(e) => updatePlano(p.id, { delivered: e.target.checked })} />Entregado</label>
+            <label className="flex items-center gap-1 text-xs" style={{ color: p.status === "aprobado" ? COLORS.green : "var(--text-600)", fontWeight: 600 }}><input type="checkbox" checked={p.status === "aprobado"} onChange={(e) => updatePlano(p.id, e.target.checked ? { status: "aprobado", delivered: true } : { status: "borrador" })} />Aprobado</label>
             <button aria-label="Eliminar" onClick={() => deletePlano(p.id)} style={{ color: "var(--text-400)" }}><Trash2 size={13} /></button>
           </div>
         ))}
@@ -2288,7 +2288,7 @@ function MAT_MaterialesPanel({ project, onUpdate }) {
   const addItem = (e) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    onUpdate({ materials: [...materials, { id: uid(), name: form.name, quantity: Number(form.quantity) || 1, unit: form.unit, received: false }] });
+    onUpdate({ materials: [...materials, { id: uid(), name: form.name, quantity: Number(form.quantity) || 1, unit: form.unit, received: false, approved: false }] });
     setForm({ name: "", quantity: 1, unit: "" });
   };
   const updateItem = (id, patch) => onUpdate({ materials: materials.map((m) => (m.id === id ? { ...m, ...patch } : m)) });
@@ -2298,14 +2298,14 @@ function MAT_MaterialesPanel({ project, onUpdate }) {
       <div className="flex items-center gap-3 mb-3">
         <ProgressRing value={stats.pct} size={44} stroke={5} color={stats.pct === 100 ? COLORS.green : COLORS.amber} />
         <div>
-          <p className="text-sm font-medium" style={{ color: "var(--text-900)" }}>{stats.recibidos} de {stats.total} recibidos</p>
+          <p className="text-sm font-medium" style={{ color: "var(--text-900)" }}>{stats.recibidos} de {stats.total} entregados · {stats.aprobados} aprobados</p>
           <p className="text-xs" style={{ color: "var(--text-400)" }}>{stats.pct}% completado</p>
         </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="text-left" style={{ color: "var(--text-400)" }}>
-            <th className="font-medium pb-2">Material</th><th className="font-medium pb-2">Cantidad</th><th className="font-medium pb-2">Unidad</th><th className="font-medium pb-2">Recibido</th><th></th>
+            <th className="font-medium pb-2">Material</th><th className="font-medium pb-2">Cantidad</th><th className="font-medium pb-2">Unidad</th><th className="font-medium pb-2">Entregado</th><th className="font-medium pb-2">Aprobado</th><th></th>
           </tr></thead>
           <tbody>
             {materials.map((m) => (
@@ -2313,11 +2313,12 @@ function MAT_MaterialesPanel({ project, onUpdate }) {
                 <td className="py-1.5 pr-2"><input className="field" value={m.name} onChange={(e) => updateItem(m.id, { name: e.target.value })} /></td>
                 <td className="py-1.5 pr-2"><input type="number" min="0" className="field" style={{ width: 70 }} value={m.quantity} onChange={(e) => updateItem(m.id, { quantity: Number(e.target.value) || 0 })} /></td>
                 <td className="py-1.5 pr-2"><input className="field" style={{ width: 80 }} value={m.unit || ""} onChange={(e) => updateItem(m.id, { unit: e.target.value })} placeholder="und" /></td>
-                <td className="py-1.5 pr-2"><input type="checkbox" checked={!!m.received} onChange={(e) => updateItem(m.id, { received: e.target.checked })} /></td>
+                <td className="py-1.5 pr-2"><input type="checkbox" checked={!!m.received} onChange={(e) => updateItem(m.id, e.target.checked ? { received: true } : { received: false, approved: false })} /></td>
+                <td className="py-1.5 pr-2"><input type="checkbox" checked={!!m.approved} onChange={(e) => updateItem(m.id, e.target.checked ? { approved: true, received: true } : { approved: false })} /></td>
                 <td className="py-1.5"><button aria-label="Eliminar" onClick={() => deleteItem(m.id)} style={{ color: "var(--text-400)" }}><Trash2 size={13} /></button></td>
               </tr>
             ))}
-            {materials.length === 0 && <tr><td colSpan={5} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin materiales registrados.</td></tr>}
+            {materials.length === 0 && <tr><td colSpan={6} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin materiales registrados.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -2375,7 +2376,7 @@ function MAT_ProjectDetail({ project, onUpdate, visits }) {
         </KpiCard>
         <KpiCard accent={ms.completo ? COLORS.green : COLORS.amber}>
           <p className="kpi-number">{ms.pct}%</p>
-          <p className="kpi-label">Materiales recibidos ({ms.recibidos}/{ms.total})</p>
+          <p className="kpi-label">Materiales entregados ({ms.recibidos}/{ms.total})</p>
         </KpiCard>
         <KpiCard accent={late(project.planosDueDate, ps.completo) ? COLORS.red : "var(--steel-300)"}>
           <p className="kpi-number" style={{ fontSize: 16 }}>{project.planosDueDate ? fdate(project.planosDueDate) : "Sin fecha"}</p>
@@ -2567,8 +2568,8 @@ function MAT_exportDocsExcel(projects, visits) {
     return {
       "Proyecto": p.name, "Cliente": p.client, "Responsable": p.manager || "",
       "Inicio": p.startDate ? fdate(p.startDate) : "", "Fin": p.endDate ? fdate(p.endDate) : "",
-      "Entrega planos": p.planosDueDate ? fdate(p.planosDueDate) : "", "Planos aprobados": ps.aprobados + "/" + ps.total,
-      "Entrega materiales": p.materialesDueDate ? fdate(p.materialesDueDate) : "", "Materiales recibidos": ms.recibidos + "/" + ms.total,
+      "Entrega planos": p.planosDueDate ? fdate(p.planosDueDate) : "", "Planos entregados": ps.entregados + "/" + ps.total, "Planos aprobados": ps.aprobados + "/" + ps.total,
+      "Entrega materiales": p.materialesDueDate ? fdate(p.materialesDueDate) : "", "Materiales entregados": ms.recibidos + "/" + ms.total, "Materiales aprobados": ms.aprobados + "/" + ms.total,
       "Notas": p.notes || "",
     };
   });
@@ -2578,7 +2579,7 @@ function MAT_exportDocsExcel(projects, visits) {
 
   const planosRows = [];
   projects.forEach((p) => (p.planos || []).forEach((pl) => planosRows.push({
-    "Proyecto": p.name, "Archivo": pl.filename, "Estado": pl.status === "aprobado" ? "Aprobado" : "Borrador", "Subido": fdate(pl.uploadedAt), "Enlace": pl.url || "",
+    "Proyecto": p.name, "Archivo": pl.filename, "Entregado": pl.delivered || pl.status === "aprobado" ? "Sí" : "No", "Estado": pl.status === "aprobado" ? "Aprobado" : "Borrador", "Subido": fdate(pl.uploadedAt), "Enlace": pl.url || "",
   })));
   const ws2 = XLSX.utils.json_to_sheet(planosRows.length ? planosRows : [{ "Proyecto": "Sin planos registrados" }]);
   ws2["!cols"] = [{ wch: 26 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 50 }];
@@ -2586,7 +2587,7 @@ function MAT_exportDocsExcel(projects, visits) {
 
   const matRows = [];
   projects.forEach((p) => (p.materials || []).forEach((m) => matRows.push({
-    "Proyecto": p.name, "Material": m.name, "Cantidad": m.quantity, "Unidad": m.unit || "", "Recibido": m.received ? "Sí" : "No",
+    "Proyecto": p.name, "Material": m.name, "Cantidad": m.quantity, "Unidad": m.unit || "", "Entregado": m.received ? "Sí" : "No", "Aprobado": m.approved ? "Sí" : "No",
   })));
   const ws3 = XLSX.utils.json_to_sheet(matRows.length ? matRows : [{ "Proyecto": "Sin materiales registrados" }]);
   ws3["!cols"] = [{ wch: 26 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
