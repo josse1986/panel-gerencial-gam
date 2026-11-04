@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="es">
-<head>
+<head><script>window.__MODULO="ordenes";</script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Órdenes de trabajo - GAM</title>
+<title>Órdenes de trabajo · GAM</title>
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -23,7 +23,6 @@
 <body>
 <div id="root"></div>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<script>window.__MODULO="ordenes";</script>
 <script type="text/babel" data-presets="react">
 /* ===== NUCLEO COMPARTIDO ===== */
 const { useState, useEffect, useMemo, useCallback, Fragment, useRef } = React;
@@ -5609,6 +5608,469 @@ function GV_Module({ expenses, setExpenses, orders }) {
   );
 }
 
+/* ===== MODULO: DASHBOARD PROFESIONAL ===== */
+function useReady(dep) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => { setReady(false); const t = setTimeout(() => setReady(true), 80); return () => clearTimeout(t); }, [dep]);
+  return ready;
+}
+
+function ACount({ value, fmt, dur }) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf, start = null; const to = Number(value) || 0; const D = dur || 900;
+    const step = (ts) => { if (start === null) start = ts; const p = Math.min(1, (ts - start) / D); const e = 1 - Math.pow(1 - p, 3); setV(to * e); if (p < 1) raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step); return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span>{fmt ? fmt(v) : Math.round(v)}</span>;
+}
+
+function DKpi({ color, label, value, fmt, sub, icon, delay }) {
+  return (
+    <div className="dash-in" style={{ animationDelay: (delay || 0) + "ms", background: "#fff", borderRadius: 16, padding: "14px 16px", border: "1px solid var(--steel-200)", borderTop: "4px solid " + color, boxShadow: "0 8px 20px -14px " + color, position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", right: -14, top: -14, width: 70, height: 70, borderRadius: 999, background: color + "18" }} />
+      <p style={{ fontSize: 11.5, color: "var(--text-400)", display: "flex", justifyContent: "space-between", position: "relative" }}><span>{label}</span><span>{icon}</span></p>
+      <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 25, color: color, marginTop: 4, fontVariantNumeric: "tabular-nums", position: "relative" }}>{typeof value === "number" ? <ACount value={value} fmt={fmt} /> : value}</p>
+      {sub && <p style={{ fontSize: 11, color: "var(--text-600)", marginTop: 2, position: "relative" }}>{sub}</p>}
+    </div>
+  );
+}
+
+function DPanel({ title, children, delay, right }) {
+  return (
+    <div className="dash-in panel" style={{ animationDelay: (delay || 0) + "ms" }}>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap"><h3 className="text-sm font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--text-900)" }}>{title}</h3>{right}</div>
+      {children}
+    </div>
+  );
+}
+
+function ADonut({ items, center, size, ready }) {
+  const sz = size || 170, stroke = 26, r = (sz - stroke) / 2, c = 2 * Math.PI * r;
+  const total = items.reduce((a, i) => a + i.value, 0);
+  let off = 0;
+  return (
+    <div className="flex items-center gap-5 flex-wrap">
+      <svg width={sz} height={sz} viewBox={"0 0 " + sz + " " + sz}>
+        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="var(--steel-100)" strokeWidth={stroke} />
+        {total > 0 && items.filter((i) => i.value > 0).map((i, k) => {
+          const d = (i.value / total) * c; const o = off; off += d;
+          return <circle key={k} cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke={i.color} strokeWidth={stroke} strokeDasharray={(ready ? d : 0) + " " + c} strokeDashoffset={-o} transform={"rotate(-90 " + sz / 2 + " " + sz / 2 + ")"} style={{ transition: "stroke-dasharray 1s cubic-bezier(.2,.8,.2,1) " + k * 120 + "ms" }}><title>{i.label + ": " + i.text}</title></circle>;
+        })}
+        <text x={sz / 2} y={sz / 2 + 2} textAnchor="middle" fontSize="20" fontWeight="700" fill="var(--text-900)" fontFamily="var(--font-display)">{center && center.big}</text>
+        <text x={sz / 2} y={sz / 2 + 18} textAnchor="middle" fontSize="10" fill="var(--text-400)">{center && center.small}</text>
+      </svg>
+      <div className="space-y-1.5">
+        {items.map((i, k) => (<div key={k} className="flex items-center gap-2 text-xs"><span style={{ width: 10, height: 10, borderRadius: 3, background: i.color }} /><span style={{ color: "var(--text-900)" }}>{i.label}</span><span style={{ color: "var(--text-400)" }}>{i.text}{total > 0 ? " · " + Math.round((i.value / total) * 100) + "%" : ""}</span></div>))}
+        {total === 0 && <p className="text-xs" style={{ color: "var(--text-400)" }}>Sin datos en este periodo.</p>}
+      </div>
+    </div>
+  );
+}
+
+function AGauge({ value, label, color, ready }) {
+  const v = Math.max(0, Math.min(100, value || 0));
+  const R = 70, C = Math.PI * R;
+  return (
+    <svg viewBox="0 0 180 110" style={{ width: "100%", maxWidth: 240 }}>
+      <path d="M 20 95 A 70 70 0 0 1 160 95" fill="none" stroke="var(--steel-100)" strokeWidth="16" strokeLinecap="round" />
+      <path d="M 20 95 A 70 70 0 0 1 160 95" fill="none" stroke={color} strokeWidth="16" strokeLinecap="round" strokeDasharray={(ready ? (v / 100) * C : 0) + " " + C} style={{ transition: "stroke-dasharray 1.1s cubic-bezier(.2,.8,.2,1)" }} />
+      <text x="90" y="82" textAnchor="middle" fontSize="26" fontWeight="700" fill="var(--text-900)" fontFamily="var(--font-display)">{Math.round(v)}%</text>
+      <text x="90" y="100" textAnchor="middle" fontSize="10" fill="var(--text-400)">{label}</text>
+    </svg>
+  );
+}
+
+// barras verticales; data [{label, a, b?, color?}] (a,b agrupadas)
+function ABars({ data, colors, names, fmt, height, ready }) {
+  const W = 720, H = height || 220, L = 48, R = 10, T = 14, B = 28;
+  const f = fmt || ((v) => String(Math.round(v)));
+  const two = data.some((d) => d.b !== undefined);
+  const max = Math.max(1, ...data.map((d) => Math.max(d.a || 0, d.b || 0)));
+  const cw = (W - L - R) / Math.max(1, data.length);
+  const bw = Math.min(two ? 18 : 36, cw / (two ? 2.6 : 1.6));
+  const yOf = (v) => T + (H - T - B) * (1 - v / max);
+  const cols = colors || [VIV.blue, VIV.orange];
+  const bar = (x, v, color, k, i) => <rect key={k} x={x} y={yOf(v)} width={bw} height={Math.max(0, H - B - yOf(v))} rx="4" fill={color} style={{ transformBox: "fill-box", transformOrigin: "bottom", transform: ready ? "scaleY(1)" : "scaleY(0)", transition: "transform .9s cubic-bezier(.2,.8,.2,1) " + i * 50 + "ms" }}><title>{(names && names[k === "b" ? 1 : 0] ? names[k === "b" ? 1 : 0] + ": " : "") + f(v)}</title></rect>;
+  return (
+    <div>
+      {names && <div className="flex items-center gap-4 flex-wrap text-xs mb-2" style={{ color: "var(--text-600)" }}>{names.map((n, i) => <span key={i} className="flex items-center gap-1"><span style={{ width: 10, height: 10, background: cols[i], borderRadius: 2 }} />{n}</span>)}</div>}
+      <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+        {[0, 0.5, 1].map((t, i) => (<g key={i}><line x1={L} x2={W - R} y1={yOf(max * t)} y2={yOf(max * t)} stroke="var(--steel-100)" /><text x={L - 5} y={yOf(max * t) + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{f(max * t)}</text></g>))}
+        {data.map((d, i) => {
+          const cx = L + cw * i + cw / 2;
+          return (<g key={i}>
+            {two ? <Fragment>{bar(cx - bw - 1, d.a || 0, cols[0], "a", i)}{bar(cx + 1, d.b || 0, cols[1], "b", i)}</Fragment> : bar(cx - bw / 2, d.a || 0, d.color || cols[0], "a", i)}
+            <text x={cx} y={H - 10} textAnchor="middle" fontSize={data.length > 14 ? 8 : 10} fill="var(--text-600)">{d.label}</text>
+          </g>);
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function AHBars({ items, fmt, max, ready }) {
+  const mx = Math.max(1, ...items.map((i) => i.value));
+  if (!items.length) return <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin datos en este periodo.</p>;
+  return (
+    <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+      {items.slice(0, max || 8).map((it, k) => (
+        <div key={it.label + k}>
+          <div className="flex items-center justify-between text-xs mb-0.5 gap-2"><span className="truncate" style={{ color: "var(--text-900)", fontWeight: 500 }}>{it.label}</span><span style={{ color: "var(--text-400)" }}>{fmt ? fmt(it.value) : it.value}{it.sub ? " · " + it.sub : ""}</span></div>
+          <div style={{ height: 10, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 999, width: ready ? (it.value / mx) * 100 + "%" : "0%", background: "linear-gradient(90deg," + (it.color || VIV_LIST[k % VIV_LIST.length]) + "," + (it.color || VIV_LIST[k % VIV_LIST.length]) + "AA)", transition: "width 1s cubic-bezier(.2,.8,.2,1) " + k * 70 + "ms" }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ALine({ data, color, fmt, height, ready }) {
+  const W = 720, H = height || 200, L = 48, R = 14, T = 14, B = 26;
+  const f = fmt || ((v) => String(Math.round(v)));
+  if (!data.length) return <p className="text-sm" style={{ color: "var(--text-400)" }}>Sin datos en este periodo.</p>;
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const xs = (i) => L + (data.length === 1 ? (W - L - R) / 2 : ((W - L - R) * i) / (data.length - 1));
+  const ys = (v) => T + (H - T - B) * (1 - v / max);
+  const pts = data.map((d, i) => xs(i) + "," + ys(d.value));
+  const line = "M" + pts.join(" L"), area = line + " L" + xs(data.length - 1) + "," + (H - B) + " L" + xs(0) + "," + (H - B) + " Z";
+  const id = "al" + color.replace("#", "");
+  return (
+    <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }}>
+      <defs><linearGradient id={id} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={color} stopOpacity="0.35" /><stop offset="1" stopColor={color} stopOpacity="0" /></linearGradient></defs>
+      {[0, 0.5, 1].map((t, i) => (<g key={i}><line x1={L} x2={W - R} y1={ys(max * t)} y2={ys(max * t)} stroke="var(--steel-100)" /><text x={L - 5} y={ys(max * t) + 3} textAnchor="end" fontSize="9" fill="var(--text-400)">{f(max * t)}</text></g>))}
+      <path d={area} fill={"url(#" + id + ")"} style={{ opacity: ready ? 1 : 0, transition: "opacity 1.2s ease .5s" }} />
+      <path d={line} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" pathLength="1" strokeDasharray="1" strokeDashoffset={ready ? 0 : 1} style={{ transition: "stroke-dashoffset 1.4s ease" }} />
+      {data.map((d, i) => (<g key={i}><circle cx={xs(i)} cy={ys(d.value)} r="4" fill="#fff" stroke={color} strokeWidth="2.5" style={{ opacity: ready ? 1 : 0, transition: "opacity .4s ease " + (0.8 + i * 0.05) + "s" }}><title>{d.label + ": " + f(d.value)}</title></circle><text x={xs(i)} y={H - 8} textAnchor="middle" fontSize={data.length > 14 ? 8 : 10} fill="var(--text-600)">{d.label}</text></g>))}
+    </svg>
+  );
+}
+
+function DTable({ head, rows, align }) {
+  return (
+    <div className="overflow-x-auto"><table className="w-full text-sm">
+      <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>{head.map((h, i) => <th key={i} className="font-medium pb-2 pr-3 whitespace-nowrap" style={{ textAlign: (align || [])[i] || "left" }}>{h}</th>)}</tr></thead>
+      <tbody>{rows.map((r, i) => (<tr key={i} style={{ borderTop: "1px solid var(--steel-100)" }}>{r.map((c, j) => { const cell = c && typeof c === "object" && !React.isValidElement(c) ? c : { v: c }; return <td key={j} className="py-2 pr-3" style={{ textAlign: (align || [])[j] || "left", color: cell.color || "var(--text-900)", fontWeight: cell.color ? 700 : 400, whiteSpace: "nowrap" }}>{cell.v}</td>; })}</tr>))}
+      {rows.length === 0 && <tr><td colSpan={head.length} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin datos en este periodo.</td></tr>}</tbody>
+    </table></div>
+  );
+}
+
+const DASH_MODS = [
+  ["general", "Visión general", "📊", "#2563EB"],
+  ["ordenes", "Órdenes de trabajo", "📋", "#FF7A00"],
+  ["proyectos", "Control de proyectos", "🏗️", "#0EA5A4"],
+  ["materiales", "Planos y materiales", "📐", "#7C3AED"],
+  ["actas", "Actas", "📝", "#EC4899"],
+  ["gastos", "Control de gasto", "💰", "#16A34A"],
+  ["varios", "Gastos varios", "🧾", "#F43F5E"],
+  ["alimentacion", "Alimentación", "🍽️", "#F59E0B"],
+];
+
+function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, gv, goTo }) {
+  const now = new Date();
+  const [mod, setMod] = useState("general");
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [month, setMonth] = useState("todos");
+  const ready = useReady(mod + year + month);
+  const inP = (iso) => !!iso && (year === "todos" || iso.slice(0, 4) === year) && (month === "todos" || Number(iso.slice(5, 7)) === Number(month));
+  const allRows = useMemo(() => OT_buildRows(orders).filter((r) => r.status !== "anulada"), [orders]);
+  const rows = allRows.filter((r) => inP(r.issue));
+  const ids = new Set(rows.map((r) => r.id));
+  const gasRows = GAS_orderRows(rows.map((r) => r.raw));
+  const exps = (expenses || []).filter((e) => ids.has(e.otId));
+  const years = [...new Set([String(now.getFullYear()), ...allRows.map((r) => r.issue.slice(0, 4)).filter(Boolean), ...(ali.entries || []).map((e) => (e.date || "").slice(0, 4)), ...(gv || []).map((e) => (e.date || "").slice(0, 4))].filter(Boolean))].sort().reverse();
+  const period = month === "todos" ? (year === "todos" ? "Todos los periodos" : "Año " + year) : RES_MESES_LARGO[Number(month) - 1] + " " + year;
+  const chartYear = year === "todos" ? now.getFullYear() : Number(year);
+  const monthsOf = (fn) => RES_MESES.map((l, i) => ({ label: l, m: i + 1, ...fn(i + 1) }));
+  const cnt = (k) => rows.filter((r) => r.status === k).length;
+  const totB = r2(rows.reduce((a, r) => a + r.budget, 0)), totA = r2(rows.reduce((a, r) => a + r.actual, 0)), res = r2(totB - totA);
+  const fm = (v) => "$" + Math.round(v).toLocaleString("es-EC");
+  const mod_ = DASH_MODS.find((m) => m[0] === mod);
+  const color = mod_[3];
+
+  /* ---------- vistas ---------- */
+  const viewGeneral = () => {
+    const cumplimiento = (() => { const d = rows.filter((r) => r.onTime !== null); return d.length ? Math.round((d.filter((r) => r.onTime).length / d.length) * 100) : 0; })();
+    const ejec = totB ? Math.min(100, Math.round((totA / totB) * 100)) : 0;
+    const mensual = monthsOf((m) => { const l = allRows.filter((r) => r.issue && Number(r.issue.slice(0, 4)) === chartYear && Number(r.issue.slice(5, 7)) === m); return { a: r2(l.reduce((s, r) => s + r.budget, 0)), b: r2(l.reduce((s, r) => s + r.actual, 0)) }; });
+    const aliTot = ALI_stats((ali.entries || []).filter((e) => inP(e.date)), ali.people || []).total;
+    const gvTot = r2((gv || []).filter((e) => inP(e.date)).reduce((a, e) => a + num(e.amount), 0));
+    const cpList = (proyectos || []);
+    const crit = cpList.filter((p) => CP_projectState(p) === "critico").length;
+    const ins = [];
+    if (rows.length) {
+      ins.push({ tone: res < 0 ? "bad" : "good", text: `Resultado del periodo: ${res >= 0 ? "ahorro" : "excedente"} de ${money(Math.abs(res))} sobre ${money(totB)} presupuestado en materiales y transporte (${ejec}% ejecutado).` });
+      if (rows.filter((r) => r.late).length) ins.push({ tone: "bad", text: `${rows.filter((r) => r.late).length} orden(es) atrasadas: requieren decisión de plazo.` });
+      if (rows.filter((r) => r.over).length) ins.push({ tone: "bad", text: `${rows.filter((r) => r.over).length} orden(es) sobre presupuesto.` });
+      if (crit) ins.push({ tone: "warn", text: `${crit} proyecto(s) en estado crítico en Control de proyectos.` });
+      ins.push({ tone: "good", text: `Costos indirectos del periodo: alimentación ${money(aliTot)} y gastos varios representativos ${money(gvTot)}.` });
+    } else ins.push({ tone: "warn", text: "No hay órdenes de trabajo en el periodo seleccionado." });
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#2563EB" icon="📋" label="Órdenes de trabajo" value={rows.length} sub={`${cnt("planificado")} plan. · ${cnt("en_curso")} en curso · ${cnt("terminado")} term.`} />
+          <DKpi color="#7C3AED" icon="🎯" label="Presupuesto (mat.+transp.)" value={totB} fmt={fm} sub="autorizado" delay={60} />
+          <DKpi color="#0EA5A4" icon="⚙️" label="Ejecutado" value={totA} fmt={fm} sub={ejec + "% del presupuesto"} delay={120} />
+          <DKpi color={res >= 0 ? "#16A34A" : "#EF4444"} icon={res >= 0 ? "📈" : "📉"} label={res >= 0 ? "Ahorro" : "Excedente"} value={Math.abs(res)} fmt={fm} sub="resultado acumulado" delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <DPanel title="Cumplimiento de plazos" delay={80}><div className="flex justify-center"><AGauge value={cumplimiento} label="órdenes terminadas a tiempo" color={cumplimiento >= 80 ? VIV.green : cumplimiento >= 50 ? VIV.amber : VIV.red} ready={ready} /></div></DPanel>
+          <DPanel title="Ejecución del presupuesto" delay={140}><div className="flex justify-center"><AGauge value={ejec} label="del presupuesto consumido" color={ejec > 100 ? VIV.red : ejec > 85 ? VIV.amber : VIV.blue} ready={ready} /></div></DPanel>
+          <DPanel title="Estado de las órdenes" delay={200}><ADonut ready={ready} size={150} items={OT_ESTADOS.filter((e) => e.key !== "anulada").map((e) => ({ label: e.label, value: cnt(e.key), color: e.color, text: String(cnt(e.key)) }))} center={{ big: String(rows.length), small: "órdenes" }} /></DPanel>
+        </div>
+        <DPanel title={"Presupuesto vs. ejecutado por mes · " + chartYear} delay={120}><ABars ready={ready} data={mensual} names={["Presupuesto", "Ejecutado"]} colors={[VIV.blue, VIV.orange]} fmt={fm} /></DPanel>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#F59E0B" icon="🍽️" label="Alimentación" value={aliTot} fmt={fm} sub="del periodo" />
+          <DKpi color="#F43F5E" icon="🧾" label="Gastos varios" value={gvTot} fmt={fm} sub="representativos" delay={60} />
+          <DKpi color="#0EA5A4" icon="🏗️" label="Proyectos en Control" value={cpList.length} sub={crit + " críticos"} delay={120} />
+          <DKpi color="#EC4899" icon="📝" label="Actas" value={(actDocs || []).filter((d) => d.docType !== "orden").length} sub="generadas desde órdenes" delay={180} />
+        </div>
+        <DPanel title="Lectura gerencial" delay={160}><V_Insights items={ins} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewOrdenes = () => {
+    const mensual = monthsOf((m) => { const l = allRows.filter((r) => r.issue && Number(r.issue.slice(0, 4)) === chartYear && Number(r.issue.slice(5, 7)) === m); return { a: l.length, b: l.filter((r) => r.terminal).length }; });
+    const cli = (() => { const m = {}; rows.forEach((r) => { m[r.client] = (m[r.client] || 0) + r.budget; }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
+    const done = rows.filter((r) => r.onTime !== null);
+    const pct = done.length ? Math.round((done.filter((r) => r.onTime).length / done.length) * 100) : 0;
+    const ins = OT_recommendations(rows).map((t) => ({ tone: /control: sin/.test(t) ? "good" : "warn", text: t }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#FF7A00" icon="📋" label="Órdenes" value={rows.length} sub={"ticket medio " + money(rows.length ? totB / rows.length : 0)} />
+          <DKpi color="#F59E0B" icon="🔧" label="En curso" value={cnt("en_curso")} sub={cnt("planificado") + " planificadas"} delay={60} />
+          <DKpi color="#EF4444" icon="⏰" label="Atrasadas" value={rows.filter((r) => r.late).length} sub={rows.filter((r) => r.over).length + " sobre presupuesto"} delay={120} />
+          <DKpi color="#16A34A" icon="✅" label="Terminadas" value={cnt("terminado")} sub={done.length ? pct + "% a tiempo" : "sin cierres aún"} delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Estado de las órdenes"><ADonut ready={ready} items={OT_ESTADOS.filter((e) => e.key !== "anulada").map((e) => ({ label: e.label, value: cnt(e.key), color: e.color, text: String(cnt(e.key)) }))} center={{ big: String(rows.length), small: "órdenes" }} /></DPanel>
+          <DPanel title={"Emitidas vs. terminadas por mes · " + chartYear}><ABars ready={ready} data={mensual} names={["Emitidas", "Terminadas"]} colors={[VIV.orange, VIV.green]} /></DPanel>
+          <DPanel title="Presupuesto por cliente"><AHBars ready={ready} items={cli} fmt={money} /></DPanel>
+          <DPanel title="Cumplimiento de plazo"><div className="flex justify-center"><AGauge ready={ready} value={pct} label="terminadas a tiempo" color={pct >= 80 ? VIV.green : VIV.amber} /></div></DPanel>
+        </div>
+        <DPanel title="Detalle de órdenes"><DTable head={["N.º", "Proyecto", "Cliente", "Estado", "Inicio", "Entrega", "Presupuesto", "Ejecutado", "Ejec.", "Semáforo"]} align={["left", "left", "left", "left", "left", "left", "right", "right", "right", "left"]}
+          rows={[...rows].sort((a, b) => b.number - a.number).map((r) => [r.number, r.name, r.client, { v: OT_estadoMeta(r.status).label, color: OT_estadoMeta(r.status).color }, r.start ? fdate(r.start) : "—", r.end ? fdate(r.end) : "—", money(r.budget), money(r.actual), r.execPct + "%", { v: r.level === "rojo" ? "● Crítico" : r.level === "amarillo" ? "● Atención" : "● En control", color: r.level === "rojo" ? COLORS.red : r.level === "amarillo" ? COLORS.amberDark : COLORS.green }])} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewProyectos = () => {
+    const list = (proyectos || []).filter((p) => { const d = CP_projectDates(p).start; return month === "todos" && year === "todos" ? true : inP(d); });
+    const est = RES_ESTADOS.map((e) => ({ label: e.label, value: list.filter((p) => CP_projectState(p) === e.key).length, color: e.color, text: String(list.filter((p) => CP_projectState(p) === e.key).length) }));
+    const avg = list.length ? Math.round(list.reduce((a, p) => a + CP_computeProgress(p.phases || []), 0) / list.length) : 0;
+    const bud = list.reduce((a, p) => { const t = CP_computeBudgetTotals(p.phases || []); return { p: a.p + t.planned, r: a.r + t.actual }; }, { p: 0, r: 0 });
+    const data = list.map((p) => ({ label: p.name.length > 16 ? p.name.slice(0, 15) + "…" : p.name, a: CP_computeProgress(p.phases || []), b: CP_computeRag(p).avancePresupuestario }));
+    const crit = list.filter((p) => CP_projectState(p) === "critico");
+    const ins = [{ tone: "good", text: `${list.length} proyecto(s) con avance físico promedio de ${avg}%.` }];
+    if (crit.length) ins.push({ tone: "bad", text: `Proyectos críticos: ${crit.map((p) => p.name).slice(0, 4).join(", ")}. Revisa fases atrasadas y riesgos altos abiertos.` });
+    const gap = list.filter((p) => CP_computeRag(p).budgetGap > 10);
+    if (gap.length) ins.push({ tone: "warn", text: `${gap.length} proyecto(s) gastan más rápido de lo que avanzan (brecha presupuesto vs. avance > 10 puntos).` });
+    if (!crit.length && !gap.length && list.length) ins.push({ tone: "good", text: "Ningún proyecto presenta alertas críticas ni brechas de presupuesto." });
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#0EA5A4" icon="🏗️" label="Proyectos" value={list.length} sub={est[0].value + " culminados"} />
+          <DKpi color="#16A34A" icon="📈" label="Avance físico promedio" value={avg} fmt={(v) => Math.round(v) + "%"} sub="ponderado por fases" delay={60} />
+          <DKpi color="#EF4444" icon="🚨" label="Críticos" value={crit.length} sub={est[2].value + " en atención"} delay={120} />
+          <DKpi color="#7C3AED" icon="💵" label="Presupuesto de fases" value={bud.p} fmt={fm} sub={"ejecutado " + money(bud.r)} delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Estado de los proyectos"><ADonut ready={ready} items={est} center={{ big: String(list.length), small: "proyectos" }} /></DPanel>
+          <DPanel title="Avance promedio"><div className="flex justify-center"><AGauge ready={ready} value={avg} label="avance físico" color={VIV.teal} /></div></DPanel>
+        </div>
+        <DPanel title="Avance físico vs. avance presupuestario por proyecto"><ABars ready={ready} data={data} names={["Avance físico %", "Presupuesto consumido %"]} colors={[VIV.teal, VIV.orange]} fmt={(v) => Math.round(v) + "%"} /></DPanel>
+        <DPanel title="Detalle por proyecto"><DTable head={["Proyecto", "Cliente", "Inicio", "Avance", "Fases atrasadas", "Plan. $", "Real $", "Semáforo"]} align={["left", "left", "left", "right", "right", "right", "right", "left"]}
+          rows={list.map((p) => { const g = CP_computeRag(p); const st = CP_projectState(p); return [p.name, p.client || "—", CP_projectDates(p).start ? fdate(CP_projectDates(p).start) : "—", g.avanceFisico + "%", g.lateCount, money(g.planned), money(g.actual), { v: st === "culminado" ? "● Culminado" : g.level === "rojo" ? "● Crítico" : g.level === "amarillo" ? "● Atención" : "● En control", color: st === "culminado" || g.level === "verde" ? COLORS.green : g.level === "rojo" ? COLORS.red : COLORS.amberDark }]; })} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewMateriales = () => {
+    const list = matProjects || [];
+    const ps = list.map((p) => ({ p, s: MAT_planosStats(p), m: MAT_materialesStats(p), c: MAT_cpInfo(p, proyectos) }));
+    const sum = (f) => ps.reduce((a, x) => a + f(x), 0);
+    const pl = { t: sum((x) => x.s.total), e: sum((x) => x.s.entregados), a: sum((x) => x.s.aprobados) };
+    const mt = { t: sum((x) => x.m.total), e: sum((x) => x.m.recibidos), a: sum((x) => x.m.aprobados) };
+    const data = ps.map((x) => ({ label: x.p.name.length > 14 ? x.p.name.slice(0, 13) + "…" : x.p.name, a: x.s.pct, b: x.m.pct }));
+    const ins = [];
+    if (pl.t) ins.push({ tone: pl.a === pl.t ? "good" : "warn", text: `Planos: ${pl.e} de ${pl.t} entregados y ${pl.a} aprobados (${Math.round((pl.a / pl.t) * 100)}%).` });
+    if (mt.t) ins.push({ tone: mt.e === mt.t ? "good" : "warn", text: `Materiales: ${mt.e} de ${mt.t} entregados y ${mt.a} aprobados.` });
+    const late = ps.filter((x) => (x.p.materialesDueDate && x.p.materialesDueDate < todayISO() && !x.m.completo) || (x.p.planosDueDate && x.p.planosDueDate < todayISO() && !x.s.completo));
+    if (late.length) ins.push({ tone: "bad", text: `${late.length} proyecto(s) con entrega de planos o materiales vencida: ${late.slice(0, 4).map((x) => x.p.name).join(", ")}.` });
+    if (!ins.length) ins.push({ tone: "warn", text: "Aún no hay planos ni materiales registrados." });
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#7C3AED" icon="📐" label="Planos entregados" value={pl.e} sub={"de " + pl.t + " · " + pl.a + " aprobados"} />
+          <DKpi color="#2563EB" icon="📦" label="Materiales entregados" value={mt.e} sub={"de " + mt.t + " · " + mt.a + " aprobados"} delay={60} />
+          <DKpi color="#16A34A" icon="🏁" label="Proyectos terminados" value={ps.filter((x) => x.c.done).length} sub={"de " + ps.length + " según Control de proyectos"} delay={120} />
+          <DKpi color="#EF4444" icon="⏳" label="Entregas vencidas" value={late.length} sub="planos o materiales" delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <DPanel title="Planos aprobados"><div className="flex justify-center"><AGauge ready={ready} value={pl.t ? (pl.a / pl.t) * 100 : 0} label="aprobados" color={VIV.violet} /></div></DPanel>
+          <DPanel title="Materiales entregados"><div className="flex justify-center"><AGauge ready={ready} value={mt.t ? (mt.e / mt.t) * 100 : 0} label="entregados" color={VIV.blue} /></div></DPanel>
+          <DPanel title="Estado de planos"><ADonut ready={ready} size={150} items={[{ label: "Aprobados", value: pl.a, color: VIV.green, text: String(pl.a) }, { label: "Entregados sin aprobar", value: pl.e - pl.a, color: VIV.amber, text: String(pl.e - pl.a) }, { label: "Sin entregar", value: pl.t - pl.e, color: VIV.red, text: String(pl.t - pl.e) }]} center={{ big: String(pl.t), small: "planos" }} /></DPanel>
+        </div>
+        <DPanel title="% de planos aprobados vs. % de materiales entregados por proyecto"><ABars ready={ready} data={data} names={["Planos aprobados %", "Materiales entregados %"]} colors={[VIV.violet, VIV.blue]} fmt={(v) => Math.round(v) + "%"} /></DPanel>
+        <DPanel title="Detalle por proyecto"><DTable head={["Proyecto", "Cliente", "Planos (aprob./total)", "Materiales (entreg./total)", "Entrega planos", "Entrega materiales", "Terminado"]} align={["left", "left", "right", "right", "left", "left", "left"]}
+          rows={ps.map((x) => [x.p.name, x.p.client || "—", x.s.aprobados + "/" + x.s.total, x.m.recibidos + "/" + x.m.total, x.p.planosDueDate ? fdate(x.p.planosDueDate) : "—", x.p.materialesDueDate ? fdate(x.p.materialesDueDate) : "—", { v: x.c.done ? "✔ Sí" : "No", color: x.c.done ? COLORS.green : undefined }])} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewActas = () => {
+    const list = (actDocs || []).filter((d) => d.docType !== "orden").filter((d) => month === "todos" && year === "todos" ? true : inP(d.date));
+    const sts = [["borrador", "Borrador", VIV.amber], ["emitido", "Emitido", VIV.blue], ["firmado", "Firmado", VIV.green]].map(([k, l, c]) => ({ label: l, value: list.filter((d) => d.status === k).length, color: c, text: String(list.filter((d) => d.status === k).length) }));
+    const cli = (() => { const m = {}; list.forEach((d) => { const k = d.client || "Sin cliente"; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value); })();
+    const mensual = monthsOf((m) => ({ a: list.filter((d) => d.date && Number(d.date.slice(0, 4)) === chartYear && Number(d.date.slice(5, 7)) === m).length }));
+    const firm = list.length ? Math.round((sts[2].value / list.length) * 100) : 0;
+    const pend = rows.filter((r) => r.status === "terminado" && !list.some((d) => d.otId === r.id && d.status !== "borrador"));
+    const ins = [{ tone: "good", text: `${list.length} acta(s): ${sts[2].value} firmadas, ${sts[1].value} emitidas y ${sts[0].value} en borrador.` }];
+    if (pend.length) ins.push({ tone: "bad", text: `${pend.length} orden(es) terminadas sin acta emitida o firmada: ${pend.slice(0, 4).map((r) => "N.º " + r.number).join(", ")}. Emítelas para cerrar la entrega.` });
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#EC4899" icon="📝" label="Actas" value={list.length} sub={list.filter((d) => d.otId).length + " vinculadas a una orden"} />
+          <DKpi color="#16A34A" icon="✍️" label="Firmadas" value={sts[2].value} sub={firm + "% del total"} delay={60} />
+          <DKpi color="#2563EB" icon="📤" label="Emitidas" value={sts[1].value} sub="pendientes de firma" delay={120} />
+          <DKpi color="#EF4444" icon="⚠️" label="Órdenes terminadas sin acta" value={pend.length} sub="por emitir" delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Estado de las actas"><ADonut ready={ready} items={sts} center={{ big: String(list.length), small: "actas" }} /></DPanel>
+          <DPanel title={"Actas por mes · " + chartYear}><ABars ready={ready} data={mensual} colors={[VIV.pink]} /></DPanel>
+          <DPanel title="Actas por cliente"><AHBars ready={ready} items={cli} /></DPanel>
+          <DPanel title="Actas firmadas"><div className="flex justify-center"><AGauge ready={ready} value={firm} label="firmadas" color={VIV.green} /></div></DPanel>
+        </div>
+        <DPanel title="Detalle de actas"><DTable head={["N.º", "Orden", "Cliente", "Fecha", "Estado"]} rows={list.map((d) => [d.number, d.otNumber ? "OT " + d.otNumber : "Manual", d.client || "—", d.date ? fdate(d.date) : "—", { v: (ACT_STATUS_META[d.status] || {}).label || d.status, color: d.status === "firmado" ? COLORS.green : d.status === "emitido" ? COLORS.steel : COLORS.amberDark }])} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewGastos = () => {
+    const sumR = (f) => r2(gasRows.reduce((s, r) => s + f(r), 0));
+    const catVals = [sumR((r) => r.aMat), sumR((r) => r.aTr), sumR((r) => r.aLab), sumR((r) => r.aOth)];
+    const cat = GAS_CATS.map((c, i) => ({ label: c.label, value: catVals[i], color: [VIV.teal, VIV.amber, VIV.green, VIV.violet][i], text: money(catVals[i]) }));
+    const mensual = monthsOf((m) => { const l = exps.filter((e) => (e.date || "").slice(0, 4) === String(chartYear) && Number((e.date || "").slice(5, 7)) === m && (e.category === "materiales" || e.category === "transporte")); return { a: r2(l.filter((e) => e.category === "materiales").reduce((s, e) => s + num(e.amount), 0)), b: r2(l.filter((e) => e.category === "transporte").reduce((s, e) => s + num(e.amount), 0)) }; });
+    let cum = 0; const acum = monthsOf((m) => { cum += r2(exps.filter((e) => (e.date || "").slice(0, 4) === String(chartYear) && Number((e.date || "").slice(5, 7)) === m && (e.category === "materiales" || e.category === "transporte")).reduce((s, e) => s + num(e.amount), 0)); return { value: cum }; });
+    const sup = (() => { const m = {}; exps.forEach((e) => { const k = e.supplier || e.worker || "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
+    const exceso = gasRows.filter((r) => r.resultEx < -0.004);
+    const ret = gasRows.filter((r) => r.returned);
+    const ins = GAS_recs(gasRows, exps, "sin").map((t) => ({ tone: /excedente|sin aprobar/.test(t) ? "bad" : /90|85/.test(t) ? "warn" : "good", text: t }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#2563EB" icon="🎯" label="Presupuesto (mat.+transp.)" value={totB} fmt={fm} sub={rows.length + " órdenes"} />
+          <DKpi color="#0EA5A4" icon="💸" label="Gasto real" value={totA} fmt={fm} sub={(totB ? Math.round((totA / totB) * 100) : 0) + "% ejecutado"} delay={60} />
+          <DKpi color={res >= 0 ? "#16A34A" : "#EF4444"} icon={res >= 0 ? "📈" : "📉"} label={res >= 0 ? "Ahorro" : "Excedente"} value={Math.abs(res)} fmt={fm} sub={exceso.length + " orden(es) con excedente"} delay={120} />
+          <DKpi color="#7C3AED" icon="↩️" label="Órdenes devueltas" value={ret.length} sub={money(ret.reduce((a, r) => a + r.retAmt, 0)) + " devueltos"} delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Gasto por categoría (MO y otros: solo dato)"><ADonut ready={ready} items={cat} center={{ big: fm(cat.reduce((a, c) => a + c.value, 0)), small: "gastado" }} /></DPanel>
+          <DPanel title="Ejecución del presupuesto"><div className="flex justify-center"><AGauge ready={ready} value={totB ? Math.min(100, (totA / totB) * 100) : 0} label="consumido" color={totA > totB ? VIV.red : VIV.blue} /></div></DPanel>
+          <DPanel title={"Materiales vs. transporte por mes · " + chartYear}><ABars ready={ready} data={mensual} names={["Materiales", "Transporte"]} colors={[VIV.teal, VIV.pink]} fmt={fm} /></DPanel>
+          <DPanel title={"Gasto acumulado · " + chartYear}><ALine ready={ready} data={acum} color={VIV.green} fmt={fm} /></DPanel>
+        </div>
+        <DPanel title="Presupuesto vs. gasto real por orden"><ABars ready={ready} data={gasRows.map((r) => ({ label: "N.º " + r.number, a: r.budgetEx, b: r.actualEx }))} names={["Presupuesto", "Gasto real"]} colors={[VIV.blue, VIV.orange]} fmt={fm} /></DPanel>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Principales proveedores / personal"><AHBars ready={ready} items={sup} fmt={money} /></DPanel>
+          <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
+        </div>
+        <DPanel title="Detalle por orden (resultado)"><DTable head={["N.º", "Proyecto", "Pres. mat.+transp.", "Real", "Resultado", "Ejec.", "MO (dato)", "Devuelto"]} align={["left", "left", "right", "right", "right", "right", "right", "left"]}
+          rows={gasRows.map((r) => [r.number, r.name, money(r.budgetEx), money(r.actualEx), { v: (r.resultEx < 0 ? "−" : "+") + money(Math.abs(r.resultEx)), color: r.resultEx < 0 ? COLORS.red : COLORS.green }, r.pctEx + "%", money(r.bLab), r.returned ? { v: "✔ " + money(r.retAmt), color: COLORS.green } : "—"])} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewVarios = () => {
+    const list = (gv || []).filter((e) => month === "todos" && year === "todos" ? true : inP(e.date));
+    const st = GV_stats(list, orders);
+    const trend = monthsOf((m) => ({ a: r2(list.filter((e) => e.date && Number(e.date.slice(0, 4)) === chartYear && Number(e.date.slice(5, 7)) === m).reduce((s, e) => s + num(e.amount), 0)) }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#F43F5E" icon="🧾" label="Total gastos varios" value={st.total} fmt={fm} sub={st.n + " registros"} />
+          <DKpi color="#16A34A" icon="✅" label="Pagado" value={st.pagado} fmt={fm} sub={st.n - st.nPend + " gasto(s)"} delay={60} />
+          <DKpi color="#F59E0B" icon="⏳" label="Pendiente de pago" value={st.pend} fmt={fm} sub={st.nPend + " gasto(s)"} delay={120} />
+          <DKpi color="#7C3AED" icon="📊" label="Promedio por gasto" value={st.n ? st.total / st.n : 0} fmt={(v) => money(v)} sub={st.byResp.length + " responsables"} delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Pagado vs. pendiente"><ADonut ready={ready} items={[{ label: "Pagado", value: st.pagado, color: VIV.green, text: money(st.pagado) }, { label: "Pendiente", value: st.pend, color: VIV.amber, text: money(st.pend) }]} center={{ big: fm(st.total), small: "total" }} /></DPanel>
+          <DPanel title={"Gasto por mes · " + chartYear}><ABars ready={ready} data={trend} colors={[VIV.pink]} fmt={fm} /></DPanel>
+          <DPanel title="Por proyecto"><AHBars ready={ready} items={st.byProject} fmt={money} /></DPanel>
+          <DPanel title="Por responsable"><AHBars ready={ready} items={st.byResp} fmt={money} /></DPanel>
+        </div>
+        <DPanel title="Detalle"><DTable head={["Fecha", "Proyecto", "Detalle", "Responsable", "Valor", "Estado"]} align={["left", "left", "left", "left", "right", "left"]} rows={list.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).map((e) => [fdate(e.date), GV_projLabel(e, orders), e.detail || "", e.responsible || "—", money(num(e.amount)), { v: e.status === "pagado" ? "Pagado" : "Pendiente", color: e.status === "pagado" ? COLORS.green : COLORS.amberDark }])} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={GV_recs(st)} /></DPanel>
+      </div>
+    );
+  };
+
+  const viewAlimentacion = () => {
+    const list = (ali.entries || []).filter((e) => month === "todos" && year === "todos" ? true : inP(e.date));
+    const st = ALI_stats(list, ali.people || []);
+    const trend = month === "todos" ? monthsOf((m) => ({ value: r2(list.filter((e) => Number((e.date || "").slice(5, 7)) === m).reduce((a, e) => a + num(e.amount), 0)) })).map((x) => ({ label: x.label, value: x.value })) : st.days.map((d) => ({ label: d.slice(8), value: r2(st.dayTotals[d]) }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DKpi color="#F59E0B" icon="🍽️" label="Gasto de alimentación" value={st.total} fmt={fm} sub={st.n + " registros"} />
+          <DKpi color="#FF7A00" icon="📅" label="Promedio por día" value={st.avgDay} fmt={(v) => money(v)} sub={st.days.length + " días con consumo"} delay={60} />
+          <DKpi color="#EC4899" icon="🤝" label="Gastos representativos" value={(st.byKind.find((k) => k.key === "representativo") || {}).total || 0} fmt={fm} sub="del periodo" delay={120} />
+          <DKpi color="#0EA5A4" icon="👷" label="Personal" value={(ali.people || []).filter((p) => p.active !== false).length} sub="activo" delay={180} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DPanel title="Gasto por tipo de comida"><ADonut ready={ready} items={st.byKind.map((k) => ({ label: k.label, value: k.total, color: k.color, text: money(k.total) }))} center={{ big: fm(st.total), small: "total" }} /></DPanel>
+          <DPanel title={month === "todos" ? "Evolución mensual" : "Evolución diaria"}><ALine ready={ready} data={trend} color={VIV.orange} fmt={fm} /></DPanel>
+          <DPanel title="Gasto por persona"><AHBars ready={ready} items={st.byPerson.map((p) => ({ label: p.label, value: p.value, sub: p.n + " reg." }))} fmt={money} /></DPanel>
+          <DPanel title="Lectura gerencial"><V_Insights items={ALI_recs(st, ali.people || [], list)} /></DPanel>
+        </div>
+      </div>
+    );
+  };
+
+  const views = { general: viewGeneral, ordenes: viewOrdenes, proyectos: viewProyectos, materiales: viewMateriales, actas: viewActas, gastos: viewGastos, varios: viewVarios, alimentacion: viewAlimentacion };
+
+  return (
+    <div className="space-y-5">
+      <style>{`@keyframes dashIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}} .dash-in{animation:dashIn .6s cubic-bezier(.2,.8,.2,1) both} @keyframes dashPulse{0%,100%{box-shadow:0 0 0 0 var(--pc)}50%{box-shadow:0 0 0 7px transparent}} .dash-tile{transition:transform .2s ease, box-shadow .2s ease} .dash-tile:hover{transform:translateY(-3px)} @media print{.dash-in{animation:none!important}}`}</style>
+      <div className="no-print" style={{ background: "linear-gradient(120deg,#0B1530 0%,#1E3A8A 55%," + color + " 100%)", borderRadius: 18, padding: "18px 22px", color: "#fff", transition: "background .5s" }}>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div style={{ background: "#fff", borderRadius: 14, padding: 6, display: "flex" }}><img src={getLogo()} alt="Logo" style={{ height: 46, width: 46, objectFit: "contain" }} /></div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <p style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 700 }}>Dashboard gerencial</p>
+            <p style={{ fontSize: 12.5, opacity: 0.88 }}>{mod_[1]} · {period} · elige un módulo para ver su información</p>
+          </div>
+          <div className="flex gap-2 items-end flex-wrap">
+            <div><label style={{ fontSize: 11, opacity: 0.85 }}>Año</label><select className="field" value={year} onChange={(e) => setYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+            <div><label style={{ fontSize: 11, opacity: 0.85 }}>Mes</label><select className="field" value={month} onChange={(e) => setMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+            <button onClick={() => window.print()} className="flex items-center gap-2 text-xs font-semibold" style={{ background: "#fff", color: "#12203A", borderRadius: 10, padding: "9px 14px" }}><Printer size={14} />Imprimir / PDF</button>
+          </div>
+        </div>
+      </div>
+      <div className="no-print grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        {DASH_MODS.map(([k, label, icon, c]) => (
+          <button key={k} onClick={() => setMod(k)} className="dash-tile text-center" style={{ "--pc": c + "66", background: mod === k ? "linear-gradient(135deg," + c + "," + c + "BB)" : "#fff", color: mod === k ? "#fff" : "var(--text-900)", border: "2px solid " + (mod === k ? c : "var(--steel-200)"), borderRadius: 14, padding: "10px 6px", boxShadow: mod === k ? "0 10px 22px -10px " + c : "none", animation: mod === k ? "dashPulse 2s ease-in-out infinite" : "none", cursor: "pointer" }}>
+            <div style={{ fontSize: 22 }}>{icon}</div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, lineHeight: 1.15, marginTop: 2 }}>{label}</div>
+          </button>
+        ))}
+      </div>
+      <div id="informe-gerencial" key={mod + year + month}>
+        <div className="hidden-screen" style={{ display: "none" }} />
+        <h2 className="text-lg font-semibold mb-3" style={{ fontFamily: "var(--font-display)", color: color }}>{mod_[2]} {mod_[1]} <span className="text-xs font-normal" style={{ color: "var(--text-400)" }}>· {period}</span></h2>
+        {views[mod]()}
+      </div>
+    </div>
+  );
+}
+
 /* ===== MODULO: RESUMEN GENERAL (vista gerencial) ===== */
 function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali, gv, goTo }) {
   const now = new Date();
@@ -5777,6 +6239,7 @@ function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali,
 
 function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefreshAll, onOpenSettings }) {
   const SECTIONS = [
+    ["dashboard", "Dashboard", "#0B1530"],
     ["resumen", "Resumen general", "#2563EB"],
     ["ordenes", "Órdenes de trabajo", "#FF7A00"],
     ["proyectos", "Control de proyectos", "#0EA5A4"],
@@ -6075,7 +6538,9 @@ function App() {
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-8">
             {BANNERS[section] && <ModuleBanner title={BANNERS[section][0]} subtitle={BANNERS[section][1]} from={BANNERS[section][2]} to={BANNERS[section][3]} />}
-            {section === "resumen" ? (
+            {section === "dashboard" ? (
+              <DASH_Module orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state} gv={gvSync.state} />
+            ) : section === "resumen" ? (
               <ResumenModule orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state} gv={gvSync.state}
                 goTo={(key, id) => { if (key === "ordenes" && id) setOtFocus(id); setSection(key); }} />
             ) : section === "proyectos" ? (
