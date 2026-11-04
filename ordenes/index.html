@@ -25,8 +25,6 @@
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script>window.__MODULO="ordenes";</script>
 <script type="text/babel" data-presets="react">
-
-
 /* ===== NUCLEO COMPARTIDO ===== */
 const { useState, useEffect, useMemo, useCallback, Fragment, useRef } = React;
 
@@ -2178,6 +2176,16 @@ async function MAT_uploadFileToServer(file) {
 
 /* ---------------------------------- estadisticas ---------------------------------- */
 
+// Busca el proyecto de Control de proyectos que corresponde a este proyecto de planos y materiales
+function MAT_cpOf(project, cpProjects) {
+  const list = cpProjects || [];
+  return list.find((p) => project.otId && p.otId === project.otId) || list.find((p) => !p.otId && (p.name || "").trim().toLowerCase() === (project.name || "").trim().toLowerCase()) || null;
+}
+function MAT_cpInfo(project, cpProjects) {
+  const cp = MAT_cpOf(project, cpProjects);
+  if (!cp) return { linked: false, done: false, pct: null };
+  return { linked: true, done: CP_projectState(cp) === "culminado", pct: CP_computeProgress(cp.phases || []), end: cp.ctrlEnd || "" };
+}
 function MAT_planosStats(project) {
   const planos = project.planos || [];
   const total = planos.length;
@@ -2333,7 +2341,8 @@ function MAT_MaterialesPanel({ project, onUpdate }) {
   );
 }
 
-function MAT_ProjectDetail({ project, onUpdate, visits }) {
+function MAT_ProjectDetail({ project, onUpdate, visits, cpProjects }) {
+  const cpi = MAT_cpInfo(project, cpProjects);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: project.name, client: project.client, manager: project.manager || "", notes: project.notes || "" });
   useEffect(() => setForm({ name: project.name, client: project.client, manager: project.manager || "", notes: project.notes || "" }), [project.id]);
@@ -2366,6 +2375,10 @@ function MAT_ProjectDetail({ project, onUpdate, visits }) {
             </div>
             <p className="text-sm mt-0.5" style={{ color: "var(--text-600)" }}>{project.client}{project.manager ? " · Responsable: " + project.manager : ""}</p>
             {project.notes && <p className="text-xs mt-1 max-w-xl" style={{ color: "var(--text-400)" }}>{project.notes}</p>}
+            <label className="inline-flex items-center gap-2 mt-3 px-3 py-2 rounded text-sm" style={{ border: "2px solid " + (cpi.done ? COLORS.green : "var(--steel-200)"), background: cpi.done ? "var(--green-soft)" : "#fff", color: cpi.done ? COLORS.green : "var(--text-600)", fontWeight: 600 }}>
+              <input type="checkbox" checked={cpi.done} readOnly disabled />
+              {cpi.done ? "Proyecto terminado según Control de proyectos" + (cpi.end ? " · " + fdate(cpi.end) : "") : cpi.linked ? "Proyecto aún no terminado en Control de proyectos (avance " + cpi.pct + "%)" : "Sin proyecto vinculado en Control de proyectos"}
+            </label>
           </Fragment>
         )}
       </div>
@@ -2569,7 +2582,7 @@ function MAT_exportDocsExcel(projects, visits) {
     return {
       "Proyecto": p.name, "Cliente": p.client, "Responsable": p.manager || "",
       "Inicio": p.startDate ? fdate(p.startDate) : "", "Fin": p.endDate ? fdate(p.endDate) : "",
-      "Entrega planos": p.planosDueDate ? fdate(p.planosDueDate) : "", "Planos entregados": ps.entregados + "/" + ps.total, "Planos aprobados": ps.aprobados + "/" + ps.total,
+      "Proyecto terminado (Control de proyectos)": p.cpDone ? "Sí" : "No", "Entrega planos": p.planosDueDate ? fdate(p.planosDueDate) : "", "Planos entregados": ps.entregados + "/" + ps.total, "Planos aprobados": ps.aprobados + "/" + ps.total,
       "Entrega materiales": p.materialesDueDate ? fdate(p.materialesDueDate) : "", "Materiales entregados": ms.recibidos + "/" + ms.total, "Materiales aprobados": ms.aprobados + "/" + ms.total,
       "Notas": p.notes || "",
     };
@@ -2696,12 +2709,12 @@ function MAT_Module({ projects, updateProject, createProject, deleteProject, vis
       <SubTabs tabs={[["proyecto", "Proyecto"], ["visitas", "Visitas técnicas"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setView("detail"); }} />
       {tab === "proyecto" ? (
         <div className="space-y-6">
-          <ModulePicker items={projects.map((p) => ({ id: p.id, name: p.name, sub: p.client }))} selectedId={selectedId}
+          <ModulePicker items={projects.map((p) => ({ id: p.id, name: p.name, sub: p.client, done: MAT_cpInfo(p, cpProjects).done }))} selectedId={selectedId}
             onSelect={(id) => { setSelectedId(id); setView("detail"); }} onNew={() => (onNewOT ? onNewOT() : setView("new"))} onDelete={handleDelete} newLabel="Nueva orden de trabajo" />
           {view === "new" ? (
             <MAT_NewProjectForm onCreate={handleCreate} onCancel={() => project && setView("detail")} cpProjects={cpProjects} />
           ) : project ? (
-            <MAT_ProjectDetail project={project} onUpdate={updateSelected} visits={visits} />
+            <MAT_ProjectDetail project={project} onUpdate={updateSelected} visits={visits} cpProjects={cpProjects} />
           ) : (
             <div className="max-w-lg mx-auto py-16 text-center">
               <p className="text-sm" style={{ color: "var(--text-400)" }}>Crea una orden de trabajo: de ahí nace el proyecto para subir planos y materiales.</p>
@@ -2711,7 +2724,7 @@ function MAT_Module({ projects, updateProject, createProject, deleteProject, vis
       ) : tab === "visitas" ? (
         <MAT_VisitsTab projects={projects} visits={visits} onAdd={addVisit} onUpdate={updateVisit} onDelete={deleteVisit} />
       ) : (
-        <MAT_ReportingTab projects={projects} visits={visits} />
+        <MAT_ReportingTab projects={projects.map((p) => ({ ...p, cpDone: MAT_cpInfo(p, cpProjects).done }))} visits={visits} />
       )}
     </div>
   );
@@ -4515,7 +4528,7 @@ function GAS_exportExcel(rows, exps, orderLabel) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exps.map((e) => ({
     Fecha: e.date, Orden: orderLabel(e.otId), Categoría: GAS_catMeta(e.category).label, Concepto: e.concept, Proveedor: e.supplier || "", Documento: e.document || "", "Personal": e.worker || "",
-    Cantidad: num(e.qty) || "", "Costo unitario": num(e.unit) || "", "Monto USD": num(e.amount), "Aprobado (sobre presupuesto)": e.approved ? "Sí" : "No", Notas: e.notes || "",
+    Cantidad: num(e.qty) || "", "Costo unitario": num(e.unit) || "", "Monto USD": num(e.amount), "Aprobado (sobre presupuesto)": e.approved ? "Sí" : "No", "Devolución": e.category === "materiales" || e.category === "transporte" ? (e.returned ? "Devuelto" : "No devuelto") : "", "Fecha devolución": e.returnDate || "", Notas: e.notes || "",
   }))), "Gastos");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((r) => ({
     "N.º": r.number, Proyecto: r.name, Cliente: r.client, Estado: OT_estadoMeta(r.status).label,
@@ -4549,6 +4562,7 @@ function GAS_openReport(rows, exps, basis, orderLabel) {
       { label: "Ejecución", value: (totB ? Math.round((totA / totB) * 100) : 0) + "%" },
       { label: "Órdenes con excedente", value: String(P.filter((x) => x.p.result < -0.004).length), color: "#C1443D" },
       { label: "Gastos sin aprobar sobre presupuesto", value: String(un.length) },
+      { label: "Mat./transp. devueltos", value: exps.filter((e) => (e.category === "materiales" || e.category === "transporte") && e.returned).length + " de " + exps.filter((e) => e.category === "materiales" || e.category === "transporte").length, color: "#7C3AED" },
     ],
     sections: [
       { heading: "Presupuesto vs. gasto real por orden", svg: RPT_barsSvg(P.map((x) => ({ label: "N.º " + x.r.number + " " + x.r.name, a: x.p.budget, b: x.p.actual, bColor: x.p.result < 0 ? "#C1443D" : "#E8A33D" })), ["Presupuesto", "Gasto real"], (v) => "$" + v.toFixed(0)) },
@@ -4602,6 +4616,15 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
         <div className="flex items-end"><label className="flex items-center gap-2 text-xs" style={{ color: "var(--text-600)" }}>
           <input type="checkbox" checked={!!f.approved} onChange={(e) => setF((x) => ({ ...x, approved: e.target.checked }))} />Gasto adicional aprobado previamente (si supera el presupuesto)</label></div>
       </div>
+      {counts && (
+        <div className="p-3 rounded flex items-center gap-4 flex-wrap" style={{ border: "2px solid " + (f.returned ? COLORS.green : "var(--steel-200)"), background: f.returned ? "var(--green-soft)" : "#fff" }}>
+          <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: f.returned ? COLORS.green : "var(--text-900)" }}>
+            <input type="checkbox" checked={!!f.returned} onChange={(e) => setF((x) => ({ ...x, returned: e.target.checked, returnDate: e.target.checked ? (x.returnDate || todayISO()) : "" }))} />
+            Devolución de {f.category === "transporte" ? "transporte" : "materiales"} (marcar si ya fue devuelto)
+          </label>
+          {f.returned && <div><label className="field-label">Fecha de devolución</label><input type="date" className="field" value={f.returnDate || ""} onChange={set("returnDate")} /></div>}
+        </div>
+      )}
       <div><label className="field-label">Notas</label><textarea className="field" rows={2} value={f.notes} onChange={set("notes")} /></div>
       {row && (
         <div className="p-3 rounded text-xs space-y-1" style={{ background: "var(--steel-100)", color: "var(--text-600)" }}>
@@ -4625,6 +4648,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const [fClient, setFClient] = useState("todos");
   const [fCat, setFCat] = useState("todos");
   const [fEstado, setFEstado] = useState("todos");
+  const [fRet, setFRet] = useState("todos");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
@@ -4637,14 +4661,16 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const years = useMemo(() => [...new Set([String(now.getFullYear()), ...expenses.map((e) => (e.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse(), [expenses]);
   const orderLabel = (id) => { const o = orders.find((x) => x.id === id); return o ? "N.º " + o.number + " · " + o.name : "(orden eliminada)"; };
 
+  const isRet = (e) => e.category === "materiales" || e.category === "transporte";
   const rows = allRows.filter((r) => (fOrder === "todos" || r.id === fOrder) && (fClient === "todos" || r.client === fClient) && (fEstado === "todos" || r.status === fEstado));
   const rowIds = new Set(rows.map((r) => r.id));
   const exps = expenses.filter((e) => rowIds.has(e.otId) &&
     (fYear === "todos" || (e.date || "").slice(0, 4) === fYear) && (fMonth === "todos" || Number((e.date || "").slice(5, 7)) === Number(fMonth)) &&
     (fCat === "todos" || e.category === fCat) &&
+    (fRet === "todos" || (isRet(e) && (fRet === "devuelto" ? !!e.returned : !e.returned))) &&
     (!q.trim() || ((e.concept || "") + " " + (e.supplier || "") + " " + (e.document || "") + " " + (e.worker || "")).toLowerCase().includes(q.trim().toLowerCase())));
-  const hayFiltros = fYear !== "todos" || fMonth !== "todos" || fOrder !== "todos" || fClient !== "todos" || fCat !== "todos" || fEstado !== "todos" || q;
-  const reset = () => { setFYear("todos"); setFMonth("todos"); setFOrder("todos"); setFClient("todos"); setFCat("todos"); setFEstado("todos"); setQ(""); };
+  const hayFiltros = fYear !== "todos" || fMonth !== "todos" || fOrder !== "todos" || fClient !== "todos" || fCat !== "todos" || fEstado !== "todos" || fRet !== "todos" || q;
+  const reset = () => { setFRet("todos"); setFYear("todos"); setFMonth("todos"); setFOrder("todos"); setFClient("todos"); setFCat("todos"); setFEstado("todos"); setQ(""); };
 
   const P = rows.map((r) => ({ r, p: GAS_pick(r, basis) }));
   const totB = r2(P.reduce((a, x) => a + x.p.budget, 0)), totA = r2(P.reduce((a, x) => a + x.p.actual, 0)), res = r2(totB - totA);
@@ -4652,6 +4678,9 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const gastoPeriodo = r2(exps.reduce((a, e) => a + num(e.amount), 0));
   const labBud = r2(rows.reduce((a, r) => a + r.bLab, 0)), labAct = r2(rows.reduce((a, r) => a + r.aLab, 0));
   const exceso = P.filter((x) => x.p.result < -0.004).length;
+  const retList = exps.filter(isRet);
+  const retN = retList.filter((e) => e.returned).length, retTot = retList.length;
+  const retAmt = r2(retList.filter((e) => e.returned).reduce((a, e) => a + num(e.amount), 0));
   const un = GAS_unapproved(rows, expenses);
 
   const chartYear = fYear === "todos" ? now.getFullYear() : Number(fYear);
@@ -4670,7 +4699,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const byCat = GAS_CATS.map((c) => ({ label: c.label, value: r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0)), color: c.color })).filter((x) => x.value > 0);
   const byClient = (() => { const m = {}; exps.forEach((e) => { const o = allRows.find((r) => r.id === e.otId); const k = o ? o.client : "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
 
-  const startNew = () => setEditing({ _new: true, id: uid(), otId: fOrder !== "todos" ? fOrder : "", date: todayISO(), category: "materiales", concept: "", supplier: "", worker: "", document: "", qty: "", unit: "", amount: "", approved: false, notes: "" });
+  const startNew = () => setEditing({ _new: true, id: uid(), otId: fOrder !== "todos" ? fOrder : "", date: todayISO(), category: "materiales", concept: "", supplier: "", worker: "", document: "", qty: "", unit: "", amount: "", approved: false, returned: false, returnDate: "", notes: "" });
   const saveExp = (e) => { const rec = { ...e }; delete rec._new; rec.name = rec.concept; rec.type = rec.category; setExpenses((prev) => (prev.some((x) => x.id === rec.id) ? prev.map((x) => (x.id === rec.id ? rec : x)) : [rec, ...prev])); setEditing(null); setTab("gastos"); };
   const delExp = (id) => { setExpenses((prev) => prev.filter((x) => x.id !== id)); setConfirmId(null); };
 
@@ -4690,6 +4719,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
         <div><label className="field-label">Orden de trabajo</label><select className="field" value={fOrder} onChange={(e) => setFOrder(e.target.value)}><option value="todos">Todas</option>{allRows.map((r) => <option key={r.id} value={r.id}>N.º {r.number} · {r.name}</option>)}</select></div>
         <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
         <div><label className="field-label">Categoría</label><select className="field" value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="todos">Todas</option>{GAS_CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
+        <div><label className="field-label">Devolución (mat./transp.)</label><select className="field" value={fRet} onChange={(e) => setFRet(e.target.value)}><option value="todos">Todas</option><option value="devuelto">Devueltos</option><option value="pendiente">No devueltos</option></select></div>
         <div><label className="field-label">Estado de la orden</label><select className="field" value={fEstado} onChange={(e) => setFEstado(e.target.value)}><option value="todos">Todos</option>{OT_ESTADOS.filter((s) => s.key !== "anulada").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
         <div><label className="field-label">Buscar</label><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Concepto, proveedor…" /></div>
       </div>
@@ -4714,6 +4744,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
           <KpiCard accent="#2563EB"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aMat, 0))}</p><p className="kpi-label">Materiales ejecutados</p></KpiCard>
           <KpiCard accent="#0EA5A4"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aTr, 0))}</p><p className="kpi-label">Transporte ejecutado</p></KpiCard>
           <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(labAct)}</p><p className="kpi-label">Mano de obra (solo dato, no se suma)</p></KpiCard>
+          <KpiCard accent={VIV.violet}><p className="kpi-number">{money(retAmt)}</p><p className="kpi-label">Devuelto ({retN} de {retTot} gastos de mat./transp.) · sin devolver {retTot - retN}</p></KpiCard>
           <KpiCard accent={un.length ? COLORS.amber : COLORS.green}><p className="kpi-number">{un.length}</p><p className="kpi-label">Gastos sobre presupuesto sin aprobar</p></KpiCard>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -4743,7 +4774,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
         <Panel>
           {list.length ? (
             <div className="overflow-x-auto"><table className="w-full text-sm">
-              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Fecha</th><th className="font-medium pb-2 pr-3">Orden</th><th className="font-medium pb-2 pr-3">Categoría</th><th className="font-medium pb-2 pr-3">Concepto</th><th className="font-medium pb-2 pr-3">Proveedor / personal</th><th className="font-medium pb-2 pr-3">Doc.</th><th className="font-medium pb-2 pr-3 text-right">Monto</th><th /></tr></thead>
+              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Fecha</th><th className="font-medium pb-2 pr-3">Orden</th><th className="font-medium pb-2 pr-3">Categoría</th><th className="font-medium pb-2 pr-3">Concepto</th><th className="font-medium pb-2 pr-3">Proveedor / personal</th><th className="font-medium pb-2 pr-3">Doc.</th><th className="font-medium pb-2 pr-3">Devolución</th><th className="font-medium pb-2 pr-3 text-right">Monto</th><th /></tr></thead>
               <tbody>
                 {list.map((e) => {
                   const c = GAS_catMeta(e.category);
@@ -4755,6 +4786,11 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
                       <td className="py-2 pr-3" style={{ color: "var(--text-900)" }}>{e.concept}{e.approved ? <span className="risk-pill" style={{ background: "var(--green-soft)", color: COLORS.green, marginLeft: 6 }}>aprobado</span> : null}</td>
                       <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{e.supplier || e.worker || "—"}</td>
                       <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{e.document || "—"}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">{isRet(e) ? (
+                        <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: e.returned ? COLORS.green : COLORS.amberDark, fontWeight: 600 }}>
+                          <input type="checkbox" checked={!!e.returned} onChange={(ev) => setExpenses((prev) => prev.map((x) => (x.id === e.id ? { ...x, returned: ev.target.checked, returnDate: ev.target.checked ? (x.returnDate || todayISO()) : "" } : x)))} />
+                          {e.returned ? "Devuelto" + (e.returnDate ? " " + fdate(e.returnDate) : "") : "No devuelto"}
+                        </label>) : <span style={{ color: "var(--text-400)" }}>—</span>}</td>
                       <td className="py-2 pr-3 text-right whitespace-nowrap font-medium">{money(num(e.amount))}</td>
                       <td className="py-2 whitespace-nowrap text-right">
                         {confirmId === e.id ? (<span><button className="text-xs mr-2" style={{ color: COLORS.red }} onClick={() => delExp(e.id)}>Eliminar</button><button className="text-xs" style={{ color: "var(--text-400)" }} onClick={() => setConfirmId(null)}>Cancelar</button></span>) : (
@@ -4763,7 +4799,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
                     </tr>
                   );
                 })}
-                <tr style={{ borderTop: "2px solid var(--steel-200)" }}><td colSpan={6} className="py-2 pr-3 text-right font-semibold">Total del filtro</td><td className="py-2 pr-3 text-right font-semibold">{money(gastoPeriodo)}</td><td /></tr>
+                <tr style={{ borderTop: "2px solid var(--steel-200)" }}><td colSpan={7} className="py-2 pr-3 text-right font-semibold">Total del filtro</td><td className="py-2 pr-3 text-right font-semibold">{money(gastoPeriodo)}</td><td /></tr>
               </tbody></table></div>
           ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>{expenses.length ? "No hay gastos con estos filtros." : "Aún no hay gastos. Registra el primero con «Registrar gasto»."}</p>}
         </Panel>
@@ -5911,8 +5947,6 @@ function App() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
-
-
 </script>
 </body>
 </html>
