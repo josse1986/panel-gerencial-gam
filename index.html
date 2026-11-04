@@ -4368,7 +4368,7 @@ function OT_withExpenses(orders, expenses) {
     const o = { ...o0, status: OT_normStatus(o0.status) };
     const list = by[o.id];
     if (!list || !list.length) return o;
-    const sum = (cat) => r2(list.filter((e) => e.category === cat).reduce((a, e) => a + num(e.amount), 0));
+    const sum = (cat) => r2(list.filter((e) => e.category === cat && !((cat === "materiales" || cat === "transporte") && e.returned)).reduce((a, e) => a + num(e.amount), 0));
     return { ...o, actualMaterials: sum("materiales"), actualTransport: sum("transporte"), actualLabor: sum("mano_obra"), actualOthers: sum("otros"), _exp: true, _expCount: list.length };
   });
 }
@@ -4399,6 +4399,7 @@ function GAS_unapproved(rows, expenses) {
     let cum = 0;
     expenses.filter((e) => e.otId === r.id).sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach((e) => {
       if (e.category !== "materiales" && e.category !== "transporte") return;
+      if (e.returned) return;
       cum += num(e.amount);
       if (cum > r.budgetAll + 0.004 && !e.approved) out.push({ e, r });
     });
@@ -4549,10 +4550,10 @@ function GAS_openReport(rows, exps, basis, orderLabel) {
   const un = GAS_unapproved(rows, exps);
   const catRows = GAS_CATS.map((c) => {
     const bud = c.key === "materiales" ? rows.reduce((a, r) => a + r.bMat, 0) : c.key === "transporte" ? rows.reduce((a, r) => a + r.bTr, 0) : 0;
-    const act = r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0));
+    const act = r2(exps.filter((e) => e.category === c.key && !((c.key === "materiales" || c.key === "transporte") && e.returned)).reduce((a, e) => a + num(e.amount), 0));
     return [c.label, money(bud), money(act), { v: money(bud - act), color: bud - act < 0 ? "#C1443D" : "#2F7D5B" }];
   });
-  const sup = {}; exps.forEach((e) => { const k = e.supplier || "—"; sup[k] = (sup[k] || 0) + num(e.amount); });
+  const sup = {}; exps.filter((e) => !((e.category === "materiales" || e.category === "transporte") && e.returned)).forEach((e) => { const k = e.supplier || "—"; sup[k] = (sup[k] || 0) + num(e.amount); });
   RPT_open({
     title: "Control de gasto GAM", subtitle: "Presupuesto vs. gasto real por orden de trabajo · " + bl,
     kpis: [
@@ -4583,9 +4584,9 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
   const isLab = f.category === "mano_obra";
   const order = orders.find((o) => o.id === f.otId);
   const row = order ? GAS_orderRows([order])[0] : null;
-  const others = expenses.filter((e) => e.otId === f.otId && e.id !== f.id && (e.category === "materiales" || e.category === "transporte")).reduce((a, e) => a + num(e.amount), 0);
+  const others = expenses.filter((e) => e.otId === f.otId && e.id !== f.id && !e.returned && (e.category === "materiales" || e.category === "transporte")).reduce((a, e) => a + num(e.amount), 0);
   const counts = f.category === "materiales" || f.category === "transporte";
-  const after = row ? r2(row.budgetAll - (others + (counts ? num(f.amount) : 0))) : 0;
+  const after = row ? r2(row.budgetAll - (others + (counts && !f.returned ? num(f.amount) : 0))) : 0;
   const submit = (e) => {
     e.preventDefault();
     if (!f.otId) { setErr("Elige la orden de trabajo a la que pertenece el gasto."); return; }
@@ -4619,7 +4620,7 @@ function GAS_Form({ initial, orders, expenses, onSave, onCancel }) {
         <div className="p-3 rounded flex items-center gap-4 flex-wrap" style={{ border: "2px solid " + (f.returned ? COLORS.green : "var(--steel-200)"), background: f.returned ? "var(--green-soft)" : "#fff" }}>
           <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: f.returned ? COLORS.green : "var(--text-900)" }}>
             <input type="checkbox" checked={!!f.returned} onChange={(e) => setF((x) => ({ ...x, returned: e.target.checked, returnDate: e.target.checked ? (x.returnDate || todayISO()) : "" }))} />
-            Devolución de {f.category === "transporte" ? "transporte" : "materiales"} (marcar si ya fue devuelto)
+            Devolución de {f.category === "transporte" ? "transporte" : "materiales"}: marcar si ya fue devuelto (se descuenta TODO el valor del gasto ejecutado)
           </label>
           {f.returned && <div><label className="field-label">Fecha de devolución</label><input type="date" className="field" value={f.returnDate || ""} onChange={set("returnDate")} /></div>}
         </div>
@@ -4674,7 +4675,8 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const P = rows.map((r) => ({ r, p: GAS_pick(r, basis) }));
   const totB = r2(P.reduce((a, x) => a + x.p.budget, 0)), totA = r2(P.reduce((a, x) => a + x.p.actual, 0)), res = r2(totB - totA);
   const resEx = r2(rows.reduce((a, r) => a + r.resultEx, 0)), resAll = r2(rows.reduce((a, r) => a + r.resultAll, 0));
-  const gastoPeriodo = r2(exps.reduce((a, e) => a + num(e.amount), 0));
+  const netExps = exps.filter((e) => !((e.category === "materiales" || e.category === "transporte") && e.returned));
+  const gastoPeriodo = r2(netExps.reduce((a, e) => a + num(e.amount), 0));
   const labBud = r2(rows.reduce((a, r) => a + r.bLab, 0)), labAct = r2(rows.reduce((a, r) => a + r.aLab, 0));
   const exceso = P.filter((x) => x.p.result < -0.004).length;
   const retList = exps.filter(isRet);
@@ -4685,7 +4687,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const chartYear = fYear === "todos" ? now.getFullYear() : Number(fYear);
   const monthData = RES_MESES.map((label, i) => {
     const vals = {}; let total = 0;
-    exps.filter((e) => (e.date || "").slice(0, 4) === String(chartYear) && Number((e.date || "").slice(5, 7)) === i + 1).forEach((e) => { vals[e.category] = (vals[e.category] || 0) + num(e.amount); total += num(e.amount); });
+    netExps.filter((e) => (e.date || "").slice(0, 4) === String(chartYear) && Number((e.date || "").slice(5, 7)) === i + 1).forEach((e) => { vals[e.category] = (vals[e.category] || 0) + num(e.amount); total += num(e.amount); });
     return { label, vals, total: r2(total) };
   });
   let cum = 0;
@@ -4693,10 +4695,10 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const catBars = GAS_CATS.slice(0, 3).map((c) => ({ label: c.label.replace("Movilización / transporte", "Transporte"), m: c.key,
     a: r2(rows.reduce((a, r) => a + (c.key === "materiales" ? r.bMat : c.key === "transporte" ? r.bTr : r.bLab), 0)),
     b: r2(rows.reduce((a, r) => a + (c.key === "materiales" ? r.aMat : c.key === "transporte" ? r.aTr : r.aLab), 0)) }));
-  const grp = (keyFn) => { const m = {}; exps.forEach((e) => { const k = keyFn(e) || "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); };
+  const grp = (keyFn) => { const m = {}; netExps.forEach((e) => { const k = keyFn(e) || "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); };
   const bySupplier = grp((e) => e.supplier || e.worker);
-  const byCat = GAS_CATS.map((c) => ({ label: c.label, value: r2(exps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0)), color: c.color })).filter((x) => x.value > 0);
-  const byClient = (() => { const m = {}; exps.forEach((e) => { const o = allRows.find((r) => r.id === e.otId); const k = o ? o.client : "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
+  const byCat = GAS_CATS.map((c) => ({ label: c.label, value: r2(netExps.filter((e) => e.category === c.key).reduce((a, e) => a + num(e.amount), 0)), color: c.color })).filter((x) => x.value > 0);
+  const byClient = (() => { const m = {}; netExps.forEach((e) => { const o = allRows.find((r) => r.id === e.otId); const k = o ? o.client : "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
 
   const startNew = () => setEditing({ _new: true, id: uid(), otId: fOrder !== "todos" ? fOrder : "", date: todayISO(), category: "materiales", concept: "", supplier: "", worker: "", document: "", qty: "", unit: "", amount: "", approved: false, returned: false, returnDate: "", notes: "" });
   const saveExp = (e) => { const rec = { ...e }; delete rec._new; rec.name = rec.concept; rec.type = rec.category; setExpenses((prev) => (prev.some((x) => x.id === rec.id) ? prev.map((x) => (x.id === rec.id ? rec : x)) : [rec, ...prev])); setEditing(null); setTab("gastos"); };
@@ -4736,14 +4738,14 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
       <div className="space-y-6">
         {Header}{Filters}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard accent={COLORS.ink}><p className="kpi-number">{money(gastoPeriodo)}</p><p className="kpi-label">Gasto del filtro ({exps.length} registros)</p></KpiCard>
+          <KpiCard accent={COLORS.ink}><p className="kpi-number">{money(gastoPeriodo)}</p><p className="kpi-label">Gasto neto del filtro ({exps.length} registros, sin devueltos)</p></KpiCard>
           <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(totB)}</p><p className="kpi-label">Presupuesto de las órdenes (materiales + transporte)</p></KpiCard>
           <KpiCard accent={res < 0 ? COLORS.red : COLORS.green}><p className="kpi-number">{money(Math.abs(res))}</p><p className="kpi-label">{resTxt(res)} acumulado · {totB ? Math.round((totA / totB) * 100) : 0}% ejecutado</p></KpiCard>
           <KpiCard accent={exceso ? COLORS.red : COLORS.green}><p className="kpi-number">{exceso}</p><p className="kpi-label">Órdenes con excedente</p></KpiCard>
           <KpiCard accent="#2563EB"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aMat, 0))}</p><p className="kpi-label">Materiales ejecutados</p></KpiCard>
           <KpiCard accent="#0EA5A4"><p className="kpi-number">{money(rows.reduce((a, r) => a + r.aTr, 0))}</p><p className="kpi-label">Transporte ejecutado</p></KpiCard>
           <KpiCard accent={COLORS.steel}><p className="kpi-number">{money(labAct)}</p><p className="kpi-label">Mano de obra (solo dato, no se suma)</p></KpiCard>
-          <KpiCard accent={VIV.violet}><p className="kpi-number">{money(retAmt)}</p><p className="kpi-label">Devuelto ({retN} de {retTot} gastos de mat./transp.) · sin devolver {retTot - retN}</p></KpiCard>
+          <KpiCard accent={VIV.violet}><p className="kpi-number">{money(retAmt)}</p><p className="kpi-label">Devuelto y descontado del resultado ({retN} de {retTot} gastos de mat./transp.)</p></KpiCard>
           <KpiCard accent={un.length ? COLORS.amber : COLORS.green}><p className="kpi-number">{un.length}</p><p className="kpi-label">Gastos sobre presupuesto sin aprobar</p></KpiCard>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -4798,7 +4800,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
                     </tr>
                   );
                 })}
-                <tr style={{ borderTop: "2px solid var(--steel-200)" }}><td colSpan={7} className="py-2 pr-3 text-right font-semibold">Total del filtro</td><td className="py-2 pr-3 text-right font-semibold">{money(gastoPeriodo)}</td><td /></tr>
+                <tr style={{ borderTop: "2px solid var(--steel-200)" }}><td colSpan={7} className="py-2 pr-3 text-right font-semibold">Total neto del filtro (sin devueltos)</td><td className="py-2 pr-3 text-right font-semibold">{money(gastoPeriodo)}</td><td /></tr>
               </tbody></table></div>
           ) : <p className="text-sm" style={{ color: "var(--text-400)" }}>{expenses.length ? "No hay gastos con estos filtros." : "Aún no hay gastos. Registra el primero con «Registrar gasto»."}</p>}
         </Panel>
@@ -4815,7 +4817,7 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
       <div className="space-y-6">
         {Header}{Filters}
         <Panel>
-          <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Seguimiento presupuestario por orden. <strong style={{ color: COLORS.green }}>+ ahorro</strong> · <strong style={{ color: COLORS.red }}>− excedente</strong>. Se compara solo materiales + transporte; la mano de obra se muestra únicamente como dato.</p>
+          <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>Seguimiento presupuestario por orden. <strong style={{ color: COLORS.green }}>+ ahorro</strong> · <strong style={{ color: COLORS.red }}>− excedente</strong>. Se compara solo materiales + transporte, ya descontado lo devuelto; la mano de obra se muestra únicamente como dato.</p>
           {sortedRows.length ? (
             <div className="overflow-x-auto"><table className="w-full text-sm">
               <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>
@@ -5456,8 +5458,171 @@ function ALI_Module({ data, setPeople, setEntries, orders }) {
   );
 }
 
+/* ===== MODULO: GASTOS VARIOS REPRESENTATIVOS ===== */
+const GV_ESTADOS = [{ key: "pendiente", label: "Pendiente", color: "#F59E0B" }, { key: "pagado", label: "Pagado", color: "#16A34A" }];
+const gv_est = (k) => GV_ESTADOS.find((e) => e.key === k) || GV_ESTADOS[0];
+
+function GV_projLabel(e, orders) {
+  const o = orders.find((x) => x.id === e.otId);
+  return o ? "N.º " + o.number + " · " + o.name : (e.projectName || "General / sin proyecto");
+}
+
+function GV_stats(list, orders) {
+  const total = r2(list.reduce((a, e) => a + num(e.amount), 0));
+  const pagado = r2(list.filter((e) => e.status === "pagado").reduce((a, e) => a + num(e.amount), 0));
+  const pend = r2(total - pagado);
+  const grp = (fn) => { const m = {}; list.forEach((e) => { const k = fn(e) || "—"; m[k] = (m[k] || 0) + num(e.amount); }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); };
+  const mm = {}; list.forEach((e) => { const k = (e.date || "").slice(0, 7); if (k) mm[k] = (mm[k] || 0) + num(e.amount); });
+  const byMonth = Object.keys(mm).sort().map((k) => ({ key: k, label: RES_MESES[Number(k.slice(5, 7)) - 1] + " " + k.slice(2, 4), value: r2(mm[k]) }));
+  return { total, pagado, pend, nPend: list.filter((e) => e.status !== "pagado").length, n: list.length, byProject: grp((e) => GV_projLabel(e, orders)), byResp: grp((e) => e.responsible), byMonth };
+}
+
+function GV_recs(st) {
+  if (!st.n) return [{ tone: "warn", text: "Aún no hay gastos varios representativos en este periodo." }];
+  const out = [{ tone: "good", text: `Total registrado ${money(st.total)}: pagado ${money(st.pagado)} y pendiente ${money(st.pend)} (${st.n} gastos).` }];
+  if (st.pend > 0) out.push({ tone: st.total && st.pend / st.total > 0.5 ? "bad" : "warn", text: `${st.nPend} gasto(s) siguen pendientes de pago por ${money(st.pend)} (${st.total ? Math.round((st.pend / st.total) * 100) : 0}% del total).` });
+  else out.push({ tone: "good", text: "Todos los gastos del periodo están pagados." });
+  if (st.byProject[0] && st.total) out.push({ tone: "good", text: `Mayor gasto por proyecto: ${st.byProject[0].label} (${money(st.byProject[0].value)}, ${Math.round((st.byProject[0].value / st.total) * 100)}%).` });
+  if (st.byResp[0] && st.byResp.length > 1 && st.total && st.byResp[0].value / st.total > 0.5) out.push({ tone: "warn", text: `${st.byResp[0].label} concentra ${Math.round((st.byResp[0].value / st.total) * 100)}% de estos gastos.` });
+  return out;
+}
+
+function GV_exportExcel(list, orders) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => ({ Fecha: e.date, Proyecto: GV_projLabel(e, orders), Detalle: e.detail || "", Responsable: e.responsible || "", "Valor USD": num(e.amount), Estado: gv_est(e.status).label, "Fecha de pago": e.paidDate || "" }))), "Gastos varios");
+  const st = GV_stats(list, orders);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byProject.map((x) => ({ Proyecto: x.label, "Total USD": x.value }))), "Por proyecto");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byResp.map((x) => ({ Responsable: x.label, "Total USD": x.value }))), "Por responsable");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(st.byMonth.map((x) => ({ Mes: x.key, "Total USD": x.value }))), "Por mes");
+  XLSX.writeFile(wb, "gastos_varios_representativos_" + todayISO() + ".xlsx");
+}
+
+function GV_openReport(list, orders, label) {
+  const st = GV_stats(list, orders);
+  RPT_open({
+    title: "Gastos varios representativos", subtitle: label,
+    kpis: [{ label: "Total", value: money(st.total) }, { label: "Pagado", value: money(st.pagado), color: "#16A34A" }, { label: "Pendiente", value: money(st.pend), color: "#F59E0B" }, { label: "Gastos", value: String(st.n) }],
+    sections: [
+      { heading: "Pagado vs. pendiente por proyecto", svg: RPT_barsSvg(st.byProject.slice(0, 15).map((p) => { const l = list.filter((e) => GV_projLabel(e, orders) === p.label); return { label: p.label, a: r2(l.filter((e) => e.status === "pagado").reduce((a, e) => a + num(e.amount), 0)), b: r2(l.filter((e) => e.status !== "pagado").reduce((a, e) => a + num(e.amount), 0)), bColor: "#F59E0B" }; }), ["Pagado", "Pendiente"], (v) => "$" + v.toFixed(2)) },
+      { heading: "Por responsable", table: { head: ["Responsable", "Total"], align: ["left", "right"], rows: st.byResp.map((x) => [x.label, money(x.value)]) } },
+      { heading: "Detalle", table: { head: ["Fecha", "Proyecto", "Detalle", "Responsable", "Valor", "Estado"], align: ["left", "left", "left", "left", "right", "left"], rows: list.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => [fdate(e.date), GV_projLabel(e, orders), e.detail || "", e.responsible || "", money(num(e.amount)), { v: gv_est(e.status).label, color: e.status === "pagado" ? "#16A34A" : "#B9791F" }]) } },
+      { heading: "Análisis y recomendaciones", bullets: GV_recs(st).map((x) => x.text) },
+    ],
+  });
+}
+
+function GV_Module({ expenses, setExpenses, orders }) {
+  const now = new Date();
+  const [tab, setTab] = useState("resumen");
+  const blank = () => ({ date: todayISO(), otId: "", projectName: "", detail: "", responsible: "", amount: "", status: "pendiente" });
+  const [f, setF] = useState(blank());
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState("");
+  const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [fProj, setFProj] = useState("todos"); const [fResp, setFResp] = useState("todos"); const [fEst, setFEst] = useState("todos");
+  const [confirmId, setConfirmId] = useState(null);
+
+  const active = orders.filter((o) => o.status !== "anulada").sort((a, b) => num(b.number) - num(a.number));
+  const resps = [...new Set(expenses.map((e) => e.responsible).filter(Boolean))].sort();
+  const list = expenses.filter((e) => (!from || e.date >= from) && (!to || e.date <= to) && (fProj === "todos" || (fProj === "general" ? !e.otId : e.otId === fProj)) && (fResp === "todos" || e.responsible === fResp) && (fEst === "todos" || e.status === fEst));
+  const st = GV_stats(list, orders);
+  const hasF = from || to || fProj !== "todos" || fResp !== "todos" || fEst !== "todos";
+  const label = (from || to ? (from ? fdate(from) : "inicio") + " a " + (to ? fdate(to) : "hoy") : "Todo el periodo");
+
+  const save = (ev) => {
+    ev.preventDefault();
+    if (!f.date) { setErr("Indica la fecha."); return; }
+    if (!f.detail.trim()) { setErr("Escribe el detalle del gasto."); return; }
+    if (!(num(f.amount) > 0)) { setErr("Ingresa el valor (puede llevar decimales)."); return; }
+    setErr("");
+    const o = orders.find((x) => x.id === f.otId);
+    const rec = { ...f, amount: r2(num(f.amount)), projectName: o ? o.name : f.projectName, paidDate: f.status === "pagado" ? (f.paidDate || todayISO()) : "", name: f.detail, type: f.status };
+    setExpenses((prev) => (editId ? prev.map((x) => (x.id === editId ? { ...x, ...rec } : x)) : [{ id: uid(), ...rec }, ...prev]));
+    setF({ ...blank(), date: f.date }); setEditId(null);
+  };
+  const edit = (e) => { setF({ date: e.date, otId: e.otId || "", projectName: e.projectName || "", detail: e.detail || "", responsible: e.responsible || "", amount: String(e.amount), status: e.status || "pendiente", paidDate: e.paidDate || "" }); setEditId(e.id); setTab("registros"); };
+  const setStatus = (id, status) => setExpenses((prev) => prev.map((x) => (x.id === id ? { ...x, status, type: status, paidDate: status === "pagado" ? (x.paidDate || todayISO()) : "" } : x)));
+
+  const Filters = (
+    <Panel>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div><label className="field-label">Desde</label><input type="date" className="field" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+        <div><label className="field-label">Hasta</label><input type="date" className="field" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div><label className="field-label">Proyecto</label><select className="field" value={fProj} onChange={(e) => setFProj(e.target.value)}><option value="todos">Todos</option><option value="general">General / sin proyecto</option>{orders.map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name}</option>)}</select></div>
+        <div><label className="field-label">Responsable</label><select className="field" value={fResp} onChange={(e) => setFResp(e.target.value)}><option value="todos">Todos</option>{resps.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+        <div><label className="field-label">Estado</label><select className="field" value={fEst} onChange={(e) => setFEst(e.target.value)}><option value="todos">Todos</option><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
+      </div>
+      {hasF && <button className="text-xs underline mt-2" style={{ color: "var(--text-600)" }} onClick={() => { setFrom(""); setTo(""); setFProj("todos"); setFResp("todos"); setFEst("todos"); }}>Quitar filtros</button>}
+    </Panel>
+  );
+
+  const trend = st.byMonth.map((m) => ({ label: m.label, value: m.value }));
+  return (
+    <div className="space-y-6">
+      <ModuleBanner title="Gastos varios representativos" subtitle="Fecha, proyecto, detalle, responsable, valor y estado de pago" from="#0F172A" to="#EC4899" />
+      <SubTabs tabs={[["resumen", "Resumen y gráficos"], ["registros", "Registros"]]} active={tab} onChange={setTab} />
+      {tab === "resumen" ? (
+        <div className="space-y-5">
+          {Filters}
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => GV_openReport(list, orders, label)}><Printer size={14} />Informe gerencial</button>
+            <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => GV_exportExcel(list, orders)}><Download size={14} />Excel</button>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <VStat color={VIV.pink} label="Total de gastos" value={money(st.total)} sub={st.n + " registros"} />
+            <VStat color={VIV.green} label="Pagado" value={money(st.pagado)} sub={st.n - st.nPend + " gasto(s)"} />
+            <VStat color={VIV.amber} label="Pendiente de pago" value={money(st.pend)} sub={st.nPend + " gasto(s)"} />
+            <VStat color={VIV.violet} label="Promedio por gasto" value={money(st.n ? st.total / st.n : 0)} sub={st.byResp.length + " responsable(s)"} />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Panel><PanelHeader title="Pagado vs. pendiente" /><V_Donut items={[{ label: "Pagado", value: st.pagado, color: VIV.green, text: money(st.pagado) }, { label: "Pendiente", value: st.pend, color: VIV.amber, text: money(st.pend) }]} center={{ big: money(st.total), small: "total" }} /></Panel>
+            <Panel><PanelHeader title="Gasto por mes" /><V_Bars data={trend} color={VIV.pink} fmt={(v) => "$" + Math.round(v)} /></Panel>
+            <Panel><PanelHeader title="Gasto por proyecto" /><OT_HBars items={st.byProject.map((p, i) => ({ ...p, color: VIV_LIST[i % VIV_LIST.length] }))} fmt={money} max={10} /></Panel>
+            <Panel><PanelHeader title="Gasto por responsable" /><OT_HBars items={st.byResp.map((p, i) => ({ ...p, color: VIV_LIST[(i + 3) % VIV_LIST.length] }))} fmt={money} max={10} /></Panel>
+          </div>
+          <Panel><PanelHeader title="Análisis gerencial" /><V_Insights items={GV_recs(st)} /></Panel>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <Panel>
+            <PanelHeader title={editId ? "Editar gasto" : "Registrar gasto representativo"} />
+            <form onSubmit={save} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div><label className="field-label">Fecha</label><input type="date" className="field" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div>
+              <div className="col-span-2"><label className="field-label">Proyecto (orden de trabajo)</label><select className="field" value={f.otId} onChange={(e) => setF({ ...f, otId: e.target.value })}><option value="">— General / otro proyecto —</option>{active.map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name} · {o.client}</option>)}</select></div>
+              <div><label className="field-label">Estado</label><select className="field" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} style={{ fontWeight: 700, borderWidth: 2, borderColor: gv_est(f.status).color }}><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></div>
+              {!f.otId && <div className="col-span-2"><label className="field-label">Nombre del proyecto (si no es una orden)</label><input className="field" value={f.projectName} onChange={(e) => setF({ ...f, projectName: e.target.value })} /></div>}
+              <div className={f.otId ? "col-span-2" : "col-span-2"}><label className="field-label">Detalle</label><input className="field" value={f.detail} onChange={(e) => setF({ ...f, detail: e.target.value })} placeholder="Ej. Almuerzo con cliente, peaje, parqueadero…" /></div>
+              <div><label className="field-label">Responsable</label><input className="field" value={f.responsible} onChange={(e) => setF({ ...f, responsible: e.target.value })} /></div>
+              <div><label className="field-label">Valor (USD)</label><DecimalInput className="field" value={f.amount} onChange={(v) => setF({ ...f, amount: v })} placeholder="0.00" /></div>
+              <div className="col-span-2 md:col-span-4 flex items-center gap-3"><button type="submit" className="btn-primary">{editId ? "Guardar cambios" : "Guardar gasto"}</button>{editId && <button type="button" className="btn-ghost" onClick={() => { setEditId(null); setF(blank()); }}>Cancelar</button>}{err && <span className="text-sm" style={{ color: COLORS.red }}>{err}</span>}</div>
+            </form>
+          </Panel>
+          {Filters}
+          <Panel>
+            <p className="text-xs mb-3" style={{ color: "var(--text-600)" }}>{st.n} gasto(s) · total <strong>{money(st.total)}</strong> · pagado <strong style={{ color: COLORS.green }}>{money(st.pagado)}</strong> · pendiente <strong style={{ color: COLORS.amberDark }}>{money(st.pend)}</strong></p>
+            <div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}><th className="font-medium pb-2 pr-3">Fecha</th><th className="font-medium pb-2 pr-3">Proyecto</th><th className="font-medium pb-2 pr-3">Detalle</th><th className="font-medium pb-2 pr-3">Responsable</th><th className="font-medium pb-2 pr-3 text-right">Valor</th><th className="font-medium pb-2 pr-3">Estado</th><th /></tr></thead>
+              <tbody>
+                {list.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).map((e) => { const m = gv_est(e.status); return (
+                  <tr key={e.id} style={{ borderTop: "1px solid var(--steel-100)" }}>
+                    <td className="py-2 pr-3 whitespace-nowrap">{fdate(e.date)}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{GV_projLabel(e, orders)}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-900)" }}>{e.detail}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-600)" }}>{e.responsible || "—"}</td>
+                    <td className="py-2 pr-3 text-right whitespace-nowrap font-medium">{money(num(e.amount))}</td>
+                    <td className="py-2 pr-3"><select className="field" style={{ width: 118, fontWeight: 700, color: m.color, borderColor: m.color }} value={e.status || "pendiente"} onChange={(ev) => setStatus(e.id, ev.target.value)}><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select>{e.status === "pagado" && e.paidDate && <div className="text-[11px]" style={{ color: "var(--text-400)" }}>{fdate(e.paidDate)}</div>}</td>
+                    <td className="py-2 whitespace-nowrap text-right">{confirmId === e.id ? (<span><button className="text-xs mr-2" style={{ color: COLORS.red }} onClick={() => { setExpenses((prev) => prev.filter((x) => x.id !== e.id)); setConfirmId(null); }}>Eliminar</button><button className="text-xs" onClick={() => setConfirmId(null)}>Cancelar</button></span>) : (<span className="flex items-center gap-3 justify-end"><button aria-label="Editar" onClick={() => edit(e)} style={{ color: "var(--text-400)" }}><Pencil size={14} /></button><button aria-label="Eliminar" onClick={() => setConfirmId(e.id)} style={{ color: "var(--text-400)" }}><Trash2 size={14} /></button></span>)}</td>
+                  </tr>); })}
+                {list.length === 0 && <tr><td colSpan={7} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>{expenses.length ? "Sin gastos con estos filtros." : "Aún no hay gastos. Registra el primero arriba."}</td></tr>}
+              </tbody></table></div>
+          </Panel>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===== MODULO: RESUMEN GENERAL (vista gerencial) ===== */
-function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali, goTo }) {
+function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali, gv, goTo }) {
   const now = new Date();
   const [year, setYear] = useState(String(now.getFullYear()));
   const [month, setMonth] = useState("todos");
@@ -5612,7 +5777,7 @@ function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali,
       </Panel>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[["proyectos", "Control de proyectos", VIV.blue, (proyectos || []).length + " proyecto(s)"], ["materiales", "Planos y materiales", VIV.teal, (matProjects || []).length + " proyecto(s)"], ["actas", "Actas", VIV.violet, (actDocs || []).filter((d) => d.docType !== "orden").length + " acta(s)"], ["gastos", "Control de gasto GAM", VIV.orange, (expenses || []).length + " gasto(s)"], ["ordenes", "Órdenes de trabajo", VIV.navy, allRows.length + " orden(es)"], ["alimentacion", "Alimentación", VIV.pink, (ali.entries || []).length + " registro(s)"]].map(([k, t, c, sub]) => (
+        {[["proyectos", "Control de proyectos", VIV.blue, (proyectos || []).length + " proyecto(s)"], ["materiales", "Planos y materiales", VIV.teal, (matProjects || []).length + " proyecto(s)"], ["actas", "Actas", VIV.violet, (actDocs || []).filter((d) => d.docType !== "orden").length + " acta(s)"], ["gastos", "Control de gasto GAM", VIV.orange, (expenses || []).length + " gasto(s)"], ["ordenes", "Órdenes de trabajo", VIV.navy, allRows.length + " orden(es)"], ["varios", "Gastos varios", VIV.pink, (gv || []).length + " gasto(s)"], ["alimentacion", "Alimentación", VIV.pink, (ali.entries || []).length + " registro(s)"]].map(([k, t, c, sub]) => (
           <button key={k} onClick={() => goTo(k)} className="text-left" style={{ background: "#fff", border: "1px solid var(--steel-200)", borderTop: "4px solid " + c, borderRadius: 12, padding: "12px 14px", cursor: "pointer" }}>
             <p className="text-sm font-semibold" style={{ color: "var(--text-900)", fontFamily: "var(--font-display)" }}>{t}</p>
             <p className="text-xs" style={{ color: "var(--text-400)" }}>{sub}</p>
@@ -5630,6 +5795,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["materiales", "Planos y materiales", "#7C3AED"],
     ["actas", "Actas", "#EC4899"],
     ["gastos", "Control de gasto GAM", "#16A34A"],
+    ["varios", "Gastos varios", "#EC4899"],
     ["alimentacion", "Alimentación", "#F59E0B"],
   ];
   const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
@@ -5694,6 +5860,7 @@ function App() {
   const actSync = useDatasetSync("ActasOrdenes", { docs: [] },
     (arr) => { const r = arr[0] || {}; return { docs: r.docs || [] }; },
     (state) => [{ id: "actas-ordenes", name: "Actas y órdenes", client: "", type: "", docs: state.docs }]);
+  const gvSync = useDatasetSync("GastosVarios", [], (arr) => arr, (state) => state.map((e) => ({ ...e, name: e.detail || "Gasto", type: e.status })));
   const aliSync = useDatasetSync("Alimentacion", { people: [], entries: [] },
     (arr) => { const r = arr[0] || {}; return { people: r.people || [], entries: r.entries || [] }; },
     (state) => [{ id: "alimentacion", name: "Alimentación", client: "", type: "", people: state.people, entries: state.entries }]);
@@ -5704,7 +5871,7 @@ function App() {
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload();
+        proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); gvSync.reload(); otSync.reload(); gasSync.reload();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -5712,8 +5879,8 @@ function App() {
     // eslint-disable-next-line
   }, []);
 
-  const allLoaded = proyectosSync.loaded && matSync.loaded && actSync.loaded && aliSync.loaded && otSync.loaded && gasSync.loaded;
-  const anyNeedsSetup = proyectosSync.needsSetup || matSync.needsSetup || actSync.needsSetup || aliSync.needsSetup || otSync.needsSetup || gasSync.needsSetup;
+  const allLoaded = proyectosSync.loaded && matSync.loaded && actSync.loaded && aliSync.loaded && gvSync.loaded && otSync.loaded && gasSync.loaded;
+  const anyNeedsSetup = proyectosSync.needsSetup || matSync.needsSetup || actSync.needsSetup || aliSync.needsSetup || gvSync.needsSetup || otSync.needsSetup || gasSync.needsSetup;
 
   if (!allLoaded) {
     return <div className="w-full h-full flex items-center justify-center" style={{ color: "var(--text-400)", fontFamily: "var(--font-body)" }}>Cargando…</div>;
@@ -5730,7 +5897,7 @@ function App() {
         <SetupScreen
           initial={getSyncConfig()}
           onCancel={showSettings ? () => setShowSettings(false) : null}
-          onSave={() => { setShowSettings(false); proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload(); }}
+          onSave={() => { setShowSettings(false); proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); gvSync.reload(); otSync.reload(); gasSync.reload(); }}
         />
       </div>
     );
@@ -5859,10 +6026,10 @@ function App() {
     gastos: ["Control de gasto GAM", "Materiales y transporte contra presupuesto · la mano de obra es solo dato", "#166534", "#16A34A"],
   };
   const syncStatus = {
-    error: proyectosSync.syncError || matSync.syncError || actSync.syncError || aliSync.syncError || otSync.syncError || gasSync.syncError,
-    last: [proyectosSync.lastSynced, matSync.lastSynced, actSync.lastSynced, aliSync.lastSynced, otSync.lastSynced, gasSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
+    error: proyectosSync.syncError || matSync.syncError || actSync.syncError || aliSync.syncError || gvSync.syncError || otSync.syncError || gasSync.syncError,
+    last: [proyectosSync.lastSynced, matSync.lastSynced, actSync.lastSynced, aliSync.lastSynced, gvSync.lastSynced, otSync.lastSynced, gasSync.lastSynced].filter(Boolean).sort((a, b) => b - a)[0] || null,
   };
-  const refreshAll = () => { proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); otSync.reload(); gasSync.reload(); };
+  const refreshAll = () => { proyectosSync.reload(); matSync.reload(); actSync.reload(); aliSync.reload(); gvSync.reload(); otSync.reload(); gasSync.reload(); };
 
   return (
     <div className="app-shell">
@@ -5921,7 +6088,7 @@ function App() {
           <div className="p-4 sm:p-8">
             {BANNERS[section] && <ModuleBanner title={BANNERS[section][0]} subtitle={BANNERS[section][1]} from={BANNERS[section][2]} to={BANNERS[section][3]} />}
             {section === "resumen" ? (
-              <ResumenModule orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state}
+              <ResumenModule orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state} gv={gvSync.state}
                 goTo={(key, id) => { if (key === "ordenes" && id) setOtFocus(id); setSection(key); }} />
             ) : section === "proyectos" ? (
               <CP_Module onNewProject={goNewOrder} focusId={focusProjectId} projects={proyectosSync.state} updateProject={updateProyecto} createProject={createProyecto} deleteProject={deleteProyecto} />
@@ -5933,6 +6100,8 @@ function App() {
               <GAS_Module orders={otEnriched} expenses={gasSync.state} setExpenses={setGastos} focusOrderId={gasFocus} onFocusHandled={() => setGasFocus(null)} />
             ) : section === "ordenes" ? (
               <OT_Module onOpenGastos={goGastos} orders={otEnriched} onSaveOrder={saveOrder} onDeleteOrder={deleteOrder} onSyncAll={syncAllOrders} newRequest={otNewRequest} onNewHandled={() => setOtNewRequest(false)} focusId={otFocus} onFocusHandled={() => setOtFocus(null)} cpProjects={proyectosSync.state} />
+            ) : section === "varios" ? (
+              <GV_Module expenses={gvSync.state} setExpenses={(u) => gvSync.setState((prev) => (typeof u === "function" ? u(prev) : u))} orders={otEnriched} />
             ) : (
               <ALI_Module data={aliSync.state} setPeople={setAliPeople} setEntries={setAliEntries} orders={otEnriched} />
             )}
