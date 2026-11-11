@@ -6094,6 +6094,7 @@ const PRO_NOTES = "Las condiciones sobre los precios pueden variar una vez culmi
 const PRO_SLOGAN = "Garantizar Proyectos y Servicios, para empresas que trascienden, Diseñando, Construyendo y Automatizando a su necesidad, con Calidad, Seguridad y Tecnología.";
 const PRO_COMPANY0 = { name: "Soluciones Industriales GAM", legal: "", ruc: "", address: "", city: "", phone: "0985619298 · 0985405731", email: "dalmeida@solucionesindustrialesgam.com · jalmeida@solucionesindustrialesgam.com", web: "", services: "Ingeniería Mecánica\nIngeniería Eléctrica\nAutomatización\nMantenimiento Industrial\nInnovación en industria y producción\nCorte Láser\nEstructuras", rep: "Dany Santiago Almeida Maldonado", repRole: "Representante legal", bank: "", slogan: PRO_SLOGAN, notes: PRO_NOTES, payTerms: "100% contra entrega", delivery: "1 día laborable", validity: 15 };
 
+const PRO_mergeCo = (s) => { const o = { ...PRO_COMPANY0 }; Object.keys(s || {}).forEach((k) => { if (s[k] !== "" && s[k] !== undefined && s[k] !== null) o[k] = s[k]; }); return o; };
 const pro_blankItem = () => ({ id: uid(), desc: "", qty: 1, unit: "u", plano: "", hotel: "", comida: "", mov: "", dias: "", mat: "", margin: 30 });
 
 function PRO_calcItem(it, disc) {
@@ -6139,7 +6140,7 @@ function pro_blank(data) {
 
 /* ---------- PDF A4 ---------- */
 function PRO_openPdf(p, company) {
-  const c = { ...PRO_COMPANY0, ...(company || {}) };
+  const c = PRO_mergeCo(company);
   const t = PRO_totals(p);
   const logo = (() => { const l = getLogo(); return /^(data:|http)/.test(l) ? l : "data:image/png;base64," + l; })();
   const e = RPT_esc, f2 = (v) => "$" + (Math.round(v * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -6297,7 +6298,7 @@ function PRO_Module({ data, setData }) {
   const [confirmId, setConfirmId] = useState(null);
   const [adv, setAdv] = useState(false);
   const [err, setErr] = useState("");
-  const docs = data.docs || [], company = { ...PRO_COMPANY0, ...(data.company || {}) };
+  const docs = data.docs || [], company = PRO_mergeCo(data.company);
   const setDocs = (u) => setData((prev) => ({ ...prev, docs: typeof u === "function" ? u(prev.docs || []) : u }));
   const ready = useReady(tab + year);
   const years = [...new Set([String(now.getFullYear()), ...docs.map((d) => (d.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
@@ -6382,7 +6383,7 @@ function PRO_Module({ data, setData }) {
     );
   };
 
-  const setC = (k, v) => setData((prev) => ({ ...prev, company: { ...PRO_COMPANY0, ...(prev.company || {}), [k]: v } }));
+  const setC = (k, v) => setData((prev) => ({ ...prev, company: { ...PRO_mergeCo(prev.company), [k]: v } }));
   const CF = (k, label, span, ph) => <div className={span || ""}><label className="field-label">{label}</label><input className="field" value={company[k] === undefined ? "" : company[k]} onChange={(ev) => setC(k, ev.target.value)} placeholder={ph || ""} /></div>;
 
   return (
@@ -6697,7 +6698,7 @@ function App() {
     (arr) => { const r = arr[0] || {}; return { docs: r.docs || [] }; },
     (state) => [{ id: "actas-ordenes", name: "Actas y órdenes", client: "", type: "", docs: state.docs }]);
   const proSync = useDatasetSync("Proformas", { docs: [], company: PRO_COMPANY0 },
-    (arr) => { const r = arr[0] || {}; return { docs: r.docs || [], company: { ...PRO_COMPANY0, ...(r.company || {}) } }; },
+    (arr) => { const r = arr[0] || {}; return { docs: r.docs || [], company: PRO_mergeCo(r.company) }; },
     (state) => [{ id: "proformas", name: "Proformas", client: "", type: "", docs: state.docs, company: state.company }]);
   const gvSync = useDatasetSync("GastosVarios", [], (arr) => arr, (state) => state.map((e) => ({ ...e, name: e.detail || "Gasto", type: e.status })));
   const aliSync = useDatasetSync("Alimentacion", { people: [], entries: [] },
