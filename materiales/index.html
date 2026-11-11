@@ -5760,7 +5760,6 @@ function DTable({ head, rows, align }) {
 
 const DASH_MODS = [
   ["general", "Visión general", "📊", "#2563EB"],
-  ["proformas", "Proformas", "📄", "#0B5FD8"],
   ["ordenes", "Órdenes de trabajo", "📋", "#FF7A00"],
   ["proyectos", "Control de proyectos", "🏗️", "#0EA5A4"],
   ["materiales", "Planos y materiales", "📐", "#7C3AED"],
@@ -5768,6 +5767,7 @@ const DASH_MODS = [
   ["gastos", "Control de gasto", "💰", "#16A34A"],
   ["varios", "Gastos varios", "🧾", "#F43F5E"],
   ["alimentacion", "Alimentación", "🍽️", "#F59E0B"],
+  ["proformas", "Proformas", "📄", "#DB2777"],
 ];
 
 function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, gv, proformas, goTo }) {
@@ -6212,12 +6212,13 @@ function PRO_stats(list, chartYear) {
   const apr = T.filter((x) => x.p.status === "aprobada"), rech = T.filter((x) => x.p.status === "rechazada");
   const cerradas = apr.length + rech.length;
   const byClient = (() => { const m = {}; T.forEach((x) => { const k = x.p.client || "Sin cliente"; m[k] = (m[k] || 0) + x.t.total; }); return Object.entries(m).map(([label, value]) => ({ label, value: r2(value) })).sort((a, b) => b.value - a.value); })();
-  const ing = sum(T, (x) => x.t.ingreso);
+  const V = T.filter((x) => x.p.status !== "rechazada"); // utilidad y costos: sin proformas rechazadas
+  const ing = sum(V, (x) => x.t.ingreso);
   return {
     T, n: T.length, total: sum(T, (x) => x.t.total), aprobado: sum(apr, (x) => x.t.total), pendiente: sum(T.filter((x) => x.p.status === "enviada"), (x) => x.t.total),
     tasa: cerradas ? Math.round((apr.length / cerradas) * 100) : 0, cerradas, nApr: apr.length, nRech: rech.length, nEnv: T.filter((x) => x.p.status === "enviada").length, nBor: T.filter((x) => x.p.status === "borrador").length,
-    ticket: T.length ? r2(sum(T, (x) => x.t.total) / T.length) : 0, neta: sum(T, (x) => x.t.neta), margNeto: ing ? (sum(T, (x) => x.t.neta) / ing) * 100 : 0,
-    saymec: sum(T, (x) => x.t.saymec), costo: sum(T, (x) => x.t.costo), comp: { mo: sum(T, (x) => x.t.mo), mat: sum(T, (x) => x.t.mat), log: sum(T, (x) => x.t.log), otros: sum(T, (x) => x.t.otros) },
+    ticket: T.length ? r2(sum(T, (x) => x.t.total) / T.length) : 0, neta: sum(V, (x) => x.t.neta), netaApr: sum(apr, (x) => x.t.neta), margNeto: ing ? (sum(V, (x) => x.t.neta) / ing) * 100 : 0,
+    saymec: sum(V, (x) => x.t.saymec), costo: sum(V, (x) => x.t.costo), comp: { mo: sum(V, (x) => x.t.mo), mat: sum(V, (x) => x.t.mat), log: sum(V, (x) => x.t.log), otros: sum(V, (x) => x.t.otros) },
     vencidas: T.filter((x) => pro_expired(x.p)), porVencer: T.filter((x) => x.p.status === "enviada" && !pro_expired(x.p) && pro_validUntil(x.p) && pro_validUntil(x.p) <= toISO(addDays(new Date(), 7))),
     byClient, nCli: byClient.length,
     monthly: RES_MESES.map((l, i) => { const m = i + 1; const inM = (x) => x.p.date && Number(x.p.date.slice(0, 4)) === chartYear && Number(x.p.date.slice(5, 7)) === m; return { label: l, a: sum(T.filter(inM), (x) => x.t.total), b: sum(T.filter((x) => inM(x) && x.p.status === "aprobada"), (x) => x.t.total) }; }),
@@ -6273,8 +6274,8 @@ function PRO_DashView({ list, chartYear, ready }) {
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <DKpi color="#B45309" icon="👷" label="M.O SAYMEC (interno)" value={st.saymec} fmt={fm} sub="mano de obra SAYMEC" />
-        <DKpi color="#0EA5A4" icon="🧮" label="Costo total estimado" value={st.costo} fmt={fm} sub="todas las proformas" delay={60} />
-        <DKpi color="#16A34A" icon="📈" label="Utilidad neta estimada" value={st.neta} fmt={fm} sub={st.margNeto.toFixed(1) + "% margen neto"} delay={120} />
+        <DKpi color="#0EA5A4" icon="🧮" label="Costo total estimado" value={st.costo} fmt={fm} sub="sin proformas rechazadas" delay={60} />
+        <DKpi color="#16A34A" icon="📈" label="Utilidad neta estimada" value={st.neta} fmt={fm} sub={st.margNeto.toFixed(1) + "% margen · aprobada " + money(st.netaApr)} delay={120} />
         <DKpi color="#7C3AED" icon="🏢" label="Clientes cotizados" value={st.nCli} sub="distintos" delay={180} />
       </div>
       <DPanel title={"Cotizado vs. aprobado por mes · " + chartYear}><ABars ready={ready} data={st.monthly} names={["Cotizado", "Aprobado"]} colors={[VIV.blue, VIV.green]} fmt={fm} /></DPanel>
@@ -6388,7 +6389,7 @@ function PRO_Module({ data, setData }) {
 
   return (
     <div className="space-y-6">
-      <ModuleBanner title="Proformas" subtitle="Cotizaciones con costeo automático, PDF A4 empresarial, dashboard y reportes" from="#0B1530" to="#FF7A00" />
+      <ModuleBanner title="Proformas" subtitle="Cotizaciones con costeo automático, PDF A4 empresarial, dashboard y reportes" from="#831843" to="#DB2777" />
       {editing ? Form() : (
         <div className="space-y-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -6626,7 +6627,6 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
   const SECTIONS = [
     ["dashboard", "Dashboard", "#0B1530"],
     ["resumen", "Resumen general", "#2563EB"],
-    ["proformas", "Proformas", "#0B1530"],
     ["ordenes", "Órdenes de trabajo", "#FF7A00"],
     ["proyectos", "Control de proyectos", "#0EA5A4"],
     ["materiales", "Planos y materiales", "#7C3AED"],
@@ -6634,6 +6634,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["gastos", "Control de gasto GAM", "#16A34A"],
     ["varios", "Gastos varios", "#EC4899"],
     ["alimentacion", "Alimentación", "#F59E0B"],
+    ["proformas", "Proformas", "#DB2777"],
   ];
   const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
   const VISIBLE = ONLY ? SECTIONS.filter((x) => x[0] === ONLY) : SECTIONS;
