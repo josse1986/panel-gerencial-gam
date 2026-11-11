@@ -6092,7 +6092,7 @@ const PRO_ESTADOS = [
 const pro_est = (k) => PRO_ESTADOS.find((e) => e.key === k) || PRO_ESTADOS[0];
 const PRO_NOTES = "Las condiciones sobre los precios pueden variar una vez culminada la vigencia de la presente proforma.\nSi el pago se realiza con cheque, depósito o transferencia bancaria, una vez confirmada la efectivización del dinero se inicia la construcción.\nCualquier trabajo que no conste en la proforma será notificado para su respectiva facturación.";
 const PRO_SLOGAN = "Garantizar Proyectos y Servicios, para empresas que trascienden, Diseñando, Construyendo y Automatizando a su necesidad, con Calidad, Seguridad y Tecnología.";
-const PRO_COMPANY0 = { name: "Soluciones Industriales GAM", legal: "", ruc: "", address: "", city: "", phone: "", email: "", web: "", rep: "Dany Santiago Almeida Maldonado", repRole: "Representante legal", bank: "", slogan: PRO_SLOGAN, notes: PRO_NOTES, payTerms: "100% contra entrega", delivery: "1 día laborable", validity: 15 };
+const PRO_COMPANY0 = { name: "Soluciones Industriales GAM", legal: "", ruc: "", address: "", city: "", phone: "0985619298 · 0985405731", email: "dalmeida@solucionesindustrialesgam.com · jalmeida@solucionesindustrialesgam.com", web: "", services: "Ingeniería Mecánica\nIngeniería Eléctrica\nAutomatización\nMantenimiento Industrial\nInnovación en industria y producción\nCorte Láser\nEstructuras", rep: "Dany Santiago Almeida Maldonado", repRole: "Representante legal", bank: "", slogan: PRO_SLOGAN, notes: PRO_NOTES, payTerms: "100% contra entrega", delivery: "1 día laborable", validity: 15 };
 
 const pro_blankItem = () => ({ id: uid(), desc: "", qty: 1, unit: "u", plano: "", hotel: "", comida: "", mov: "", dias: "", mat: "", margin: 30 });
 
@@ -6107,11 +6107,12 @@ function PRO_calcItem(it, disc) {
   const AK = AH * AJ;                                           // valor de regreso (utilidad)
   const AL = AH + AK;                                       // precio unitario de venta
   const AM = AL * (1 - (disc || 0));                            // ingreso unitario (tras descuento)
+  const AA = V * 7;                                             // M.O SAYMEC (solo visualización interna)
   const AN = AE + Z + W + Y;                                    // costos de servicio
   const AY = AM * PRO_P.impuestoVenta;
   const AO = AN + AY + U * PRO_P.indDia;                        // costos totales
   const AP = AM - AN, AQ = AM - AO;
-  return { qty: q, plano: J, mo: W, mat: Z, log: AE, costoDirecto: AH, price: r2(AL), raw: AL * q, total: AL * q, ingreso: AM * q, costoServ: AN * q, costo: AO * q, bruta: AP * q, neta: AQ * q,
+  return { qty: q, plano: J, mo: W, mat: Z, log: AE, costoDirecto: AH, saymec: AA, saymecQ: AA * q, price: r2(AL), raw: AL * q, total: AL * q, ingreso: AM * q, costoServ: AN * q, costo: AO * q, bruta: AP * q, neta: AQ * q,
     otros: (AY + U * PRO_P.indDia) * q, moQ: W * q, matQ: Z * q, logQ: AE * q, margBruto: AM ? (AP / AM) * 100 : 0, margNeto: AM ? (AQ / AM) * 100 : 0 };
 }
 
@@ -6123,7 +6124,7 @@ function PRO_totals(p) {
   const sum = (k) => lines.reduce((a, l) => a + l[k], 0);
   const ingreso = sum("ingreso"), costo = sum("costo"), neta = sum("neta"), bruta = sum("bruta");
   return { lines, sub1, desc, sub2, iva, total, ingreso, costo, neta, bruta, margNeto: ingreso ? (neta / ingreso) * 100 : 0, margBruto: ingreso ? (bruta / ingreso) * 100 : 0,
-    mo: sum("moQ"), mat: sum("matQ"), log: sum("logQ"), otros: sum("otros") };
+    saymec: sum("saymecQ"), mo: sum("moQ"), mat: sum("matQ"), log: sum("logQ"), otros: sum("otros") };
 }
 
 const pro_validUntil = (p) => { if (!p.date) return ""; return toISO(addDays(new Date(p.date + "T00:00:00"), num(p.validity) || 0)); };
@@ -6144,6 +6145,12 @@ function PRO_openPdf(p, company) {
   const e = RPT_esc, f2 = (v) => "$" + (Math.round(v * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const rows = (p.items || []).map((it, i) => `<tr><td class="c">${i + 1}</td><td class="d">${e(it.desc)}</td><td class="c">${e(num(it.qty))}</td><td class="c">${e(it.unit || "u")}</td><td class="r">${f2(t.lines[i].price)}</td><td class="r b">${f2(t.lines[i].total)}</td></tr>`).join("");
   const info = (k, v) => (v ? `<tr><td class="ik">${k}</td><td class="iv">${e(v)}</td></tr>` : "");
+  const IC = { mec: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/><circle cx="12" cy="12" r="6.5"/>', ele: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>', aut: '<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>', man: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.2-.5-.5-2.2z"/>', inn: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>', las: '<path d="M2 12h9"/><circle cx="14" cy="12" r="2.2"/><path d="M17 12h5M14 6v2.5M14 15.5V18M9.5 7.5l1.7 1.7M16.8 14.8l1.7 1.7M18.5 7.5l-1.7 1.7"/>', est: '<path d="M3 21h18M5 21V9l7-5 7 5v12M9 21v-6h6v6M3 9h18"/>', gen: '<circle cx="12" cy="12" r="8"/><path d="M8.5 12l2.5 2.5 4.5-5"/>', tel: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>', mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>' };
+  const svgI = (k, col, sz) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="${col}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${IC[k]}</svg>`;
+  const icoOf = (s) => { const x = s.toLowerCase(); return /mec[aá]n/.test(x) ? "mec" : /el[eé]ctr/.test(x) ? "ele" : /autom/.test(x) ? "aut" : /manten/.test(x) ? "man" : /innov/.test(x) ? "inn" : /l[aá]ser|laser|corte/.test(x) ? "las" : /estruct/.test(x) ? "est" : "gen"; };
+  const svcs = String(c.services || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const svcHtml = svcs.length ? `<div class="sv">${svcs.map((s) => `<div class="s"><div class="ic">${svgI(icoOf(s), "#FF7A00", 20)}</div><span>${e(s)}</span></div>`).join("")}</div>` : "";
+  const ct = (k, v, sep) => (v ? `<div class="ct">${svgI(k, "#FF7A00", 11)}<span>${String(v).split(/\s*[·|]\s*|\n/).filter(Boolean).map((x) => e(x)).join(sep)}</span></div>` : "");
   const notes = String(p.notes || "").split("\n").map((s) => s.trim()).filter(Boolean).map((s) => `<li>${e(s)}</li>`).join("");
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Proforma ${e(pro_code(p))}</title><style>
   @page{size:A4;margin:0}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -6154,6 +6161,8 @@ function PRO_openPdf(p, company) {
   .hd img{height:26mm;width:26mm;object-fit:contain}.co{flex:1}.co h1{margin:0;font-size:19px;color:#12203A;letter-spacing:.02em}.co p{margin:2px 0 0;color:#52606D;font-size:9.5px}
   .bx{border:1.5px solid #12203A;border-radius:6px;min-width:62mm;overflow:hidden}.bx .t{background:#12203A;color:#fff;text-align:center;font-weight:700;letter-spacing:.2em;padding:5px;font-size:13px}
   .bx .n{background:#FF7A00;color:#fff;text-align:center;font-weight:700;padding:3px;font-size:12px}.bx table{width:100%;border-collapse:collapse}.bx td{padding:3px 8px;font-size:10px}.bx td:first-child{color:#52606D}.bx td:last-child{text-align:right;font-weight:700}
+  .ct{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:9.5px;color:#12203A;font-weight:600}
+  .sv{display:flex;margin:2px 14mm 0;background:#12203A;border-radius:6px;padding:7px 4px;border-bottom:3px solid #FF7A00}.sv .s{flex:1;text-align:center;color:#fff;font-size:7.6px;font-weight:700;line-height:1.2;padding:0 3px;border-right:1px solid #2B3B5C}.sv .s:last-child{border:0}.sv .ic{margin-bottom:3px;display:flex;justify-content:center}
   .sec{padding:0 14mm}.cols{display:flex;gap:10px;margin-top:6px}.cols>div{flex:1;border:1px solid #C7D2DC;border-radius:6px;overflow:hidden}
   .cols h3{margin:0;background:#EEF2F6;color:#12203A;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px;border-bottom:2px solid #FF7A00}
   table.i{width:100%;border-collapse:collapse}.ik{color:#52606D;padding:3px 8px;width:30%;vertical-align:top}.iv{padding:3px 8px;font-weight:600}
@@ -6168,14 +6177,14 @@ function PRO_openPdf(p, company) {
   .sg{display:flex;gap:30px;margin-top:26px;page-break-inside:avoid}.sg div{flex:1;text-align:center;border-top:1px solid #12203A;padding-top:4px;font-size:9.5px;color:#52606D}.sg b{color:#12203A;display:block}
   .ft{position:fixed;left:0;right:0;bottom:0;background:#12203A;color:#C7D2DC;text-align:center;padding:6px 14mm;font-size:8.5px}.ft b{color:#FFB366}
   </style></head><body><div class="pg"><div class="top"></div>
-  <div class="hd"><img src="${logo}" alt="Logo"><div class="co"><h1>${e(c.legal || c.name)}</h1><p>${e(c.slogan || "")}</p></div>
+  <div class="hd"><img src="${logo}" alt="Logo"><div class="co"><h1>${e(c.legal || c.name)}</h1><p>${e(c.slogan || "")}</p>${ct("tel", c.phone, "  ·  ")}${ct("mail", c.email, "  ·  ")}</div>
   <div class="bx"><div class="t">PROFORMA</div><div class="n">N.º ${e(pro_code(p))}</div><table><tr><td>Fecha</td><td>${e(fdate(p.date))}</td></tr><tr><td>Vigencia</td><td>${e(num(p.validity))} días</td></tr><tr><td>Válida hasta</td><td>${e(fdate(pro_validUntil(p)))}</td></tr></table></div></div>
-  <div class="sec"><div class="cols">
+  ${svcHtml}<div class="sec"><div class="cols">
    <div><h3>Datos del cliente</h3><table class="i">${info("Cliente", p.client)}${info("RUC / C.I.", p.ruc)}${info("Dirección", p.address)}${info("Contacto", p.contact)}${info("Teléfono", p.phone)}${info("Correo", p.email)}</table></div>
-   <div><h3>Datos de la empresa</h3><table class="i">${info("Razón social", c.legal || c.name)}${info("RUC", c.ruc)}${info("Dirección", [c.address, c.city].filter(Boolean).join(", "))}${info("Teléfono", c.phone)}${info("Correo", c.email)}${info("Web", c.web)}</table></div></div>
+   <div><h3>Datos de la empresa</h3><table class="i">${info("Razón social", c.legal || c.name)}${info("RUC", c.ruc)}${info("Dirección", [c.address, c.city].filter(Boolean).join(", "))}${info("Teléfono", String(c.phone || "").replace(/\s*·\s*/g, " / "))}${info("Correo", String(c.email || "").replace(/\s*·\s*/g, "\n"))}${info("Web", c.web)}</table></div></div>
   ${p.workTitle ? `<div class="wt"><span>▌</span> ${e(p.workTitle)}</div>` : `<div style="height:8px"></div>`}
   <table class="it"><thead><tr><th style="width:5%">N.º</th><th>DESCRIPCIÓN DEL TRABAJO</th><th style="width:8%">CANT.</th><th style="width:8%">UNID.</th><th style="width:13%">P. UNITARIO</th><th style="width:13%">TOTAL</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="tot"><table><tr><td>Subtotal</td><td>${f2(t.sub1)}</td></tr>${t.desc > 0 ? `<tr><td>Descuento (${e(num(p.discount))}%)</td><td>-${f2(t.desc)}</td></tr><tr><td>Subtotal neto</td><td>${f2(t.sub2)}</td></tr>` : ""}<tr><td>I.V.A. ${Math.round(PRO_P.iva * 100)}%</td><td>${f2(t.iva)}</td></tr><tr class="g"><td>TOTAL USD</td><td>${f2(t.total)}</td></tr></table></div>
+  <div class="tot"><table><tr><td>Subtotal</td><td>${f2(t.sub1)}</td></tr><tr><td>Descuento (${e(num(p.discount))}%)</td><td>${t.desc > 0 ? "-" : ""}${f2(t.desc)}</td></tr><tr><td>Subtotal 2</td><td>${f2(t.sub2)}</td></tr><tr><td>I.V.A. ${Math.round(PRO_P.iva * 100)}%</td><td>${f2(t.iva)}</td></tr><tr class="g"><td>TOTAL USD</td><td>${f2(t.total)}</td></tr></table></div>
   <div class="cm"><div><small>Forma de pago</small><b>${e(p.payTerms || "—")}</b></div><div><small>Tiempo de entrega</small><b>${e(p.delivery || "—")}</b></div><div><small>Vigencia de la proforma</small><b>${e(num(p.validity))} días · hasta ${e(fdate(pro_validUntil(p)))}</b></div></div>
   ${c.bank ? `<div class="nt"><h4>Datos para el pago</h4><ul><li>${e(c.bank)}</li></ul></div>` : ""}
   ${notes ? `<div class="nt"><h4>Notas y condiciones</h4><ul>${notes}</ul></div>` : ""}
@@ -6188,9 +6197,9 @@ function PRO_openPdf(p, company) {
 
 function PRO_exportExcel(list) {
   const wb = XLSX.utils.book_new();
-  const rowsS = list.map((p) => { const t = PRO_totals(p); return { "N.º": pro_code(p), Fecha: p.date, Cliente: p.client, RUC: p.ruc, Estado: pro_est(p.status).label, "Válida hasta": pro_validUntil(p), "Forma de pago": p.payTerms, "Tiempo de entrega": p.delivery, Subtotal: t.sub1, Descuento: t.desc, IVA: t.iva, Total: t.total, "Costo total": r2(t.costo), "Utilidad neta": r2(t.neta), "Margen neto %": r2(t.margNeto) }; });
+  const rowsS = list.map((p) => { const t = PRO_totals(p); return { "N.º": pro_code(p), Fecha: p.date, Cliente: p.client, RUC: p.ruc, Estado: pro_est(p.status).label, "Válida hasta": pro_validUntil(p), "Forma de pago": p.payTerms, "Tiempo de entrega": p.delivery, Subtotal: t.sub1, Descuento: t.desc, IVA: t.iva, Total: t.total, "Costo total": r2(t.costo), "M.O SAYMEC": r2(t.saymec), "Utilidad neta": r2(t.neta), "Margen neto %": r2(t.margNeto) }; });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsS), "Proformas");
-  const det = []; list.forEach((p) => { const t = PRO_totals(p); (p.items || []).forEach((it, i) => { const l = t.lines[i]; det.push({ "N.º": pro_code(p), Cliente: p.client, Descripción: it.desc, Cant: num(it.qty), Unid: it.unit, "H. plano": num(it.plano), Hotel: num(it.hotel), Comida: num(it.comida), Movilización: num(it.mov), Días: num(it.dias), Materiales: num(it.mat), "% regreso": num(it.margin), "P. unitario": l.price, Total: l.total, "Costo total": r2(l.costo), "Utilidad neta": r2(l.neta), "Margen neto %": r2(l.margNeto) }); }); });
+  const det = []; list.forEach((p) => { const t = PRO_totals(p); (p.items || []).forEach((it, i) => { const l = t.lines[i]; det.push({ "N.º": pro_code(p), Cliente: p.client, Descripción: it.desc, Cant: num(it.qty), Unid: it.unit, "H. plano": num(it.plano), Hotel: num(it.hotel), Comida: num(it.comida), Movilización: num(it.mov), Días: num(it.dias), Materiales: num(it.mat), "% regreso": num(it.margin), "P. unitario": l.price, Total: l.total, "Costo total": r2(l.costo), "M.O SAYMEC": r2(l.saymecQ), "Utilidad neta": r2(l.neta), "Margen neto %": r2(l.margNeto) }); }); });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(det), "Detalle");
   XLSX.writeFile(wb, "proformas_" + todayISO() + ".xlsx");
 }
@@ -6207,7 +6216,7 @@ function PRO_stats(list, chartYear) {
     T, n: T.length, total: sum(T, (x) => x.t.total), aprobado: sum(apr, (x) => x.t.total), pendiente: sum(T.filter((x) => x.p.status === "enviada"), (x) => x.t.total),
     tasa: cerradas ? Math.round((apr.length / cerradas) * 100) : 0, cerradas, nApr: apr.length, nRech: rech.length, nEnv: T.filter((x) => x.p.status === "enviada").length, nBor: T.filter((x) => x.p.status === "borrador").length,
     ticket: T.length ? r2(sum(T, (x) => x.t.total) / T.length) : 0, neta: sum(T, (x) => x.t.neta), margNeto: ing ? (sum(T, (x) => x.t.neta) / ing) * 100 : 0,
-    comp: { mo: sum(T, (x) => x.t.mo), mat: sum(T, (x) => x.t.mat), log: sum(T, (x) => x.t.log), otros: sum(T, (x) => x.t.otros) },
+    saymec: sum(T, (x) => x.t.saymec), costo: sum(T, (x) => x.t.costo), comp: { mo: sum(T, (x) => x.t.mo), mat: sum(T, (x) => x.t.mat), log: sum(T, (x) => x.t.log), otros: sum(T, (x) => x.t.otros) },
     vencidas: T.filter((x) => pro_expired(x.p)), porVencer: T.filter((x) => x.p.status === "enviada" && !pro_expired(x.p) && pro_validUntil(x.p) && pro_validUntil(x.p) <= toISO(addDays(new Date(), 7))),
     byClient, nCli: byClient.length,
     monthly: RES_MESES.map((l, i) => { const m = i + 1; const inM = (x) => x.p.date && Number(x.p.date.slice(0, 4)) === chartYear && Number(x.p.date.slice(5, 7)) === m; return { label: l, a: sum(T.filter(inM), (x) => x.t.total), b: sum(T.filter((x) => inM(x) && x.p.status === "aprobada"), (x) => x.t.total) }; }),
@@ -6232,12 +6241,12 @@ function PRO_openReport(list, label) {
   const st = PRO_stats(list, new Date().getFullYear());
   RPT_open({
     title: "Proformas", subtitle: label,
-    kpis: [{ label: "Proformas", value: String(st.n) }, { label: "Monto cotizado (con IVA)", value: money(st.total) }, { label: "Aprobado", value: money(st.aprobado), color: "#16A34A" }, { label: "Tasa de aprobación", value: st.tasa + "%" }, { label: "Utilidad neta estimada", value: money(st.neta), color: "#16A34A" }, { label: "Margen neto", value: st.margNeto.toFixed(1) + "%" }],
+    kpis: [{ label: "Proformas", value: String(st.n) }, { label: "Monto cotizado (con IVA)", value: money(st.total) }, { label: "Aprobado", value: money(st.aprobado), color: "#16A34A" }, { label: "Tasa de aprobación", value: st.tasa + "%" }, { label: "Utilidad neta estimada", value: money(st.neta), color: "#16A34A" }, { label: "Margen neto", value: st.margNeto.toFixed(1) + "%" }, { label: "M.O SAYMEC (interno)", value: money(st.saymec), color: "#B45309" }],
     sections: [
       { heading: "Análisis gerencial", bullets: PRO_recs(st).map((x) => x.text) },
       { heading: "Por estado", table: { head: ["Estado", "Proformas", "Monto"], align: ["left", "right", "right"], rows: PRO_ESTADOS.map((s) => { const l = st.T.filter((x) => x.p.status === s.key); return [{ v: s.label, color: s.color }, String(l.length), money(l.reduce((a, x) => a + x.t.total, 0))]; }) } },
       { heading: "Por cliente", table: { head: ["Cliente", "Monto cotizado"], align: ["left", "right"], rows: st.byClient.map((c) => [c.label, money(c.value)]) } },
-      { heading: "Detalle de proformas", table: { head: ["N.º", "Fecha", "Cliente", "Estado", "Total", "Utilidad neta", "Margen"], align: ["left", "left", "left", "left", "right", "right", "right"], rows: st.T.map((x) => [pro_code(x.p), fdate(x.p.date), x.p.client || "—", { v: pro_est(x.p.status).label, color: pro_est(x.p.status).color }, money(x.t.total), money(x.t.neta), x.t.margNeto.toFixed(1) + "%"]) } },
+      { heading: "Detalle de proformas", table: { head: ["N.º", "Fecha", "Cliente", "Estado", "Total", "M.O SAYMEC", "Utilidad neta", "Margen"], align: ["left", "left", "left", "left", "right", "right", "right", "right"], rows: st.T.map((x) => [pro_code(x.p), fdate(x.p.date), x.p.client || "—", { v: pro_est(x.p.status).label, color: pro_est(x.p.status).color }, money(x.t.total), money(x.t.saymec), money(x.t.neta), x.t.margNeto.toFixed(1) + "%"]) } },
     ],
   });
 }
@@ -6260,6 +6269,12 @@ function PRO_DashView({ list, chartYear, ready }) {
         <DPanel title="Tasa de aprobación" delay={80}><div className="flex justify-center"><AGauge ready={ready} value={st.tasa} label={st.nApr + " de " + st.cerradas + " cerradas"} color={st.tasa >= 50 ? VIV.green : VIV.amber} /></div></DPanel>
         <DPanel title="Margen neto estimado" delay={140}><div className="flex justify-center"><AGauge ready={ready} value={Math.max(0, st.margNeto)} label={"utilidad neta " + money(st.neta)} color={st.margNeto >= 25 ? VIV.green : st.margNeto >= 15 ? VIV.amber : VIV.red} /></div></DPanel>
         <DPanel title="Estado de las proformas" delay={200}><ADonut ready={ready} size={150} items={PRO_ESTADOS.map((s) => ({ label: s.label, value: st.T.filter((x) => x.p.status === s.key).length, color: s.color, text: String(st.T.filter((x) => x.p.status === s.key).length) }))} center={{ big: String(st.n), small: "proformas" }} /></DPanel>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <DKpi color="#B45309" icon="👷" label="M.O SAYMEC (interno)" value={st.saymec} fmt={fm} sub="mano de obra SAYMEC" />
+        <DKpi color="#0EA5A4" icon="🧮" label="Costo total estimado" value={st.costo} fmt={fm} sub="todas las proformas" delay={60} />
+        <DKpi color="#16A34A" icon="📈" label="Utilidad neta estimada" value={st.neta} fmt={fm} sub={st.margNeto.toFixed(1) + "% margen neto"} delay={120} />
+        <DKpi color="#7C3AED" icon="🏢" label="Clientes cotizados" value={st.nCli} sub="distintos" delay={180} />
       </div>
       <DPanel title={"Cotizado vs. aprobado por mes · " + chartYear}><ABars ready={ready} data={st.monthly} names={["Cotizado", "Aprobado"]} colors={[VIV.blue, VIV.green]} fmt={fm} /></DPanel>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -6331,11 +6346,12 @@ function PRO_Module({ data, setData }) {
                 <div key={k}><label className="field-label">{lb}</label><DecimalInput className="field" value={it[k]} onChange={(v) => setItem(it.id, k, v)} placeholder="0" /><p style={{ fontSize: 10, color: "var(--text-400)", marginTop: 2 }}>{hint}</p></div>
               ))}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
               <VStat color={VIV.blue} label="Precio unitario" value={money(l.price)} />
               <VStat color={VIV.violet} label="Total del ítem" value={money(l.total)} />
               <VStat color={l.neta >= 0 ? VIV.green : VIV.red} label="Utilidad neta (interno)" value={money(l.neta)} sub={l.margNeto.toFixed(1) + "% margen"} />
               <VStat color={VIV.teal} label="Costo total (interno)" value={money(l.costo)} sub={"bruta " + money(l.bruta)} />
+              <VStat color={VIV.amber} label="M.O SAYMEC (interno)" value={money(l.saymecQ)} sub={money(l.saymec) + " por unidad"} />
             </div>
           </Panel>); })}
         <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => setEditing({ ...editing, items: [...editing.items, pro_blankItem()] })}><Plus size={14} />Agregar ítem</button>
@@ -6343,10 +6359,11 @@ function PRO_Module({ data, setData }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2"><label className="field-label">Notas y condiciones (salen en el PDF)</label><textarea className="field" rows={6} value={editing.notes} onChange={(ev) => setEditing({ ...editing, notes: ev.target.value })} /></div>
             <div>
-              <div className="mb-3"><label className="field-label">Descuento (%)</label><DecimalInput className="field" value={editing.discount} onChange={(v) => setEditing({ ...editing, discount: v })} placeholder="0" /></div>
+              <div className="mb-3"><label className="field-label">Descuento (%) — se aplica al subtotal</label><DecimalInput className="field" value={editing.discount} onChange={(v) => setEditing({ ...editing, discount: v })} placeholder="0" /></div>
               <table className="w-full text-sm"><tbody>
                 <tr><td style={{ color: "var(--text-600)" }}>Subtotal</td><td className="text-right">{money(t.sub1)}</td></tr>
-                {t.desc > 0 && <tr><td style={{ color: "var(--text-600)" }}>Descuento</td><td className="text-right">−{money(t.desc)}</td></tr>}
+                <tr><td style={{ color: "var(--text-600)" }}>Descuento {num(editing.discount)}%</td><td className="text-right">{t.desc > 0 ? "−" : ""}{money(t.desc)}</td></tr>
+                <tr><td style={{ color: "var(--text-600)" }}>Subtotal 2</td><td className="text-right">{money(t.sub2)}</td></tr>
                 <tr><td style={{ color: "var(--text-600)" }}>IVA 15%</td><td className="text-right">{money(t.iva)}</td></tr>
                 <tr><td className="font-bold pt-1">TOTAL</td><td className="text-right font-bold pt-1" style={{ fontSize: 18, color: VIV.blue }}>{money(t.total)}</td></tr>
               </tbody></table>
@@ -6420,8 +6437,8 @@ function PRO_Module({ data, setData }) {
               <PanelHeader title="Datos de la empresa (salen en el PDF)" />
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {CF("name", "Nombre comercial", "col-span-2")}{CF("legal", "Razón social", "col-span-2", "Si es distinta al nombre comercial")}
-                {CF("ruc", "RUC")}{CF("phone", "Teléfono")}{CF("email", "Correo", "col-span-2")}
-                {CF("address", "Dirección", "col-span-2")}{CF("city", "Ciudad")}{CF("web", "Sitio web")}
+                {CF("ruc", "RUC")}{CF("phone", "Teléfonos (separados por · )")}{CF("email", "Correos (separados por · )", "col-span-2")}
+                <div className="col-span-2 md:col-span-4"><label className="field-label">Servicios (uno por línea, salen con icono en el PDF)</label><textarea className="field" rows={4} value={company.services} onChange={(ev) => setC("services", ev.target.value)} /></div>{CF("address", "Dirección", "col-span-2")}{CF("city", "Ciudad")}{CF("web", "Sitio web")}
                 {CF("rep", "Representante", "col-span-2")}{CF("repRole", "Cargo", "col-span-2")}
                 {CF("bank", "Datos bancarios para el pago", "col-span-2 md:col-span-4", "Banco · tipo de cuenta · N.º · titular · RUC")}
                 {CF("payTerms", "Forma de pago por defecto", "col-span-2")}{CF("delivery", "Tiempo de entrega por defecto", "col-span-2")}
