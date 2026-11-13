@@ -461,7 +461,7 @@ const CP_PHASE_TEMPLATE = [
   { name: "Inicio y propuesta", shortName: "Inicio", weight: 5,
     deliverables: ["Acta de constitución firmada", "Alcance y objetivos definidos", "Contrato u orden de compra aprobado"] },
   { name: "Planificación", shortName: "Planificación", weight: 10,
-    deliverables: ["Cronograma detallado", "Presupuesto aprobado", "Plan de gestión de riesgos"] },
+    deliverables: ["Cronograma detallado", "Recursos y requerimientos confirmados", "Plan de gestión de riesgos"] },
   { name: "Ingeniería y diseño", shortName: "Ingeniería", weight: 15,
     deliverables: ["Planos y modelos aprobados", "Memorias de cálculo", "Especificaciones técnicas emitidas"] },
   { name: "Procura", shortName: "Procura", weight: 15,
@@ -540,17 +540,17 @@ function CP_projectState(project) {
 
 function CP_computeRag(project) {
   const lateCount = project.phases.filter(CP_isPhaseLate).length;
-  const { planned, actual } = CP_computeBudgetTotals(project.phases);
   const avanceFisico = CP_computeProgress(project.phases);
-  const avancePresupuestario = planned > 0 ? Math.round((actual / planned) * 100) : 0;
   const openRisks = (project.risks || []).filter((r) => r.status === "abierto");
   const highOpen = openRisks.filter((r) => riskLevel(r.prob, r.impact) === "alto").length;
   const medOpen = openRisks.filter((r) => riskLevel(r.prob, r.impact) === "medio").length;
-  const budgetGap = avancePresupuestario - avanceFisico;
+  const incs = (project.incidents || []).filter((i) => i.status !== "cerrada");
+  const incOpen = incs.length, incHigh = incs.filter((i) => i.severity === "alta").length, incMed = incs.filter((i) => i.severity === "media").length;
   let level = "verde";
-  if (highOpen > 0 || lateCount >= 2 || budgetGap > 15) level = "rojo";
-  else if (lateCount === 1 || budgetGap > 5 || medOpen > 0) level = "amarillo";
-  return { level, lateCount, avanceFisico, avancePresupuestario, budgetGap, highOpen, medOpen, planned, actual };
+  if (highOpen > 0 || incHigh > 0 || lateCount >= 2) level = "rojo";
+  else if (lateCount === 1 || medOpen > 0 || incMed > 0) level = "amarillo";
+  // El presupuesto se gestiona en Órdenes de trabajo y Control de gasto: aquí no se usa.
+  return { level, lateCount, avanceFisico, avancePresupuestario: 0, budgetGap: 0, highOpen, medOpen, incOpen, incHigh, incMed, planned: 0, actual: 0 };
 }
 
 function CP_buildMilestones(project) {
@@ -571,7 +571,10 @@ function CP_recommendations(project, rag) {
   if (rag.lateCount > 0) {
     out.push(`Revisar el cronograma: ${rag.lateCount} fase(s) están fuera de la fecha planificada. Evaluar reasignación de recursos o renegociar el plazo con el cliente.`);
   }
-  if (rag.budgetGap > 5) {
+  if (rag.incOpen > 0) {
+    out.push(`Hay ${rag.incOpen} incidencia(s) de construcción abiertas${rag.incHigh ? " (" + rag.incHigh + " de severidad alta)" : ""}. Asignar responsable y fecha de cierre.`);
+  }
+  if (false) {
     out.push("El gasto ejecutado avanza más rápido que el avance físico del proyecto. Se recomienda una revisión de costos y control de cambios antes de iniciar la siguiente fase.");
   }
   if (rag.highOpen > 0) {
@@ -767,7 +770,6 @@ function CP_ProjectHeader({ project, rag, tab, setTab, onUpdateMeta }) {
 function CP_KpiRow({ rag, milestones }) {
   const next = milestones.find((m) => !m.done);
   const daysLeft = next ? daysBetween(todayISO(), next.date) : null;
-  const gapIcon = rag.budgetGap > 5 ? <TrendingUp size={14} color={COLORS.red} /> : rag.budgetGap < -5 ? <TrendingDown size={14} color={COLORS.green} /> : <Minus size={14} color={"var(--text-400)"} />;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <KpiCard accent={rag.level === "rojo" ? COLORS.red : rag.level === "amarillo" ? COLORS.amber : COLORS.green}>
@@ -779,14 +781,10 @@ function CP_KpiRow({ rag, milestones }) {
           </div>
         </div>
       </KpiCard>
-      <KpiCard accent="var(--steel-300)">
-        <div className="flex items-center gap-3">
-          <ProgressRing value={rag.avancePresupuestario} color={COLORS.ink} size={54} stroke={6} track="var(--steel-100)" />
-          <div>
-            <p className="kpi-number flex items-center gap-1">{rag.avancePresupuestario}% {gapIcon}</p>
-            <p className="kpi-label">Ejecución presupuestaria</p>
-          </div>
-        </div>
+      <KpiCard accent={rag.incHigh > 0 ? COLORS.red : rag.incOpen > 0 ? COLORS.amber : COLORS.green}>
+        <p className="kpi-number">{rag.incOpen}</p>
+        <p className="kpi-label">Incidencias abiertas</p>
+        <p className="text-xs mt-1" style={{ color: "var(--text-400)" }}>{rag.incHigh} alta(s) · {rag.lateCount} fase(s) atrasada(s)</p>
       </KpiCard>
       <KpiCard accent={rag.highOpen > 0 ? COLORS.red : rag.medOpen > 0 ? COLORS.amber : COLORS.green}>
         <p className="kpi-number">{rag.highOpen + rag.medOpen}</p>
@@ -866,16 +864,16 @@ function CP_PhaseFlow({ phases, expandedId, setExpandedId, onUpdatePhase, onTogg
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
               <div>
-                <label className="field-label">Presupuesto planificado</label>
-                <DecimalInput className="field" value={p.budgetPlanned} onChange={(v) => onUpdatePhase(p.id, { budgetPlanned: parseFloat(v) || 0 })} placeholder="0.00" />
-              </div>
-              <div>
-                <label className="field-label">Presupuesto ejecutado</label>
-                <DecimalInput className="field" value={p.budgetActual} onChange={(v) => onUpdatePhase(p.id, { budgetActual: parseFloat(v) || 0 })} placeholder="0.00" />
-              </div>
-              <div>
                 <label className="field-label">Responsable de la fase</label>
                 <input className="field" value={p.responsible || ""} onChange={(e) => onUpdatePhase(p.id, { responsible: e.target.value })} placeholder="Nombre del responsable" />
+              </div>
+              <div>
+                <label className="field-label">Inicio real</label>
+                <input type="date" className="field" value={p.actualStart || ""} onChange={(e) => onUpdatePhase(p.id, { actualStart: e.target.value })} />
+              </div>
+              <div className="col-span-2 md:col-span-3">
+                <label className="field-label">Observaciones de la fase</label>
+                <textarea className="field" rows={2} value={p.notes || ""} onChange={(e) => onUpdatePhase(p.id, { notes: e.target.value })} placeholder="Avances, bloqueos, pendientes…" />
               </div>
             </div>
             <p className="field-label mb-2">Entregables</p>
@@ -883,7 +881,7 @@ function CP_PhaseFlow({ phases, expandedId, setExpandedId, onUpdatePhase, onTogg
               {p.deliverables.map((d) => (
                 <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "var(--text-900)" }}>
                   <input type="checkbox" checked={d.done} onChange={() => onToggleDeliverable(p.id, d.id)} />
-                  <span style={{ textDecoration: d.done ? "line-through" : "none", color: d.done ? "var(--text-400)" : "var(--text-900)" }}>{d.name}</span>
+                  <span style={{ textDecoration: d.done ? "line-through" : "none", color: d.done ? "var(--text-400)" : "var(--text-900)" }}>{d.name === "Presupuesto aprobado" ? "Recursos y requerimientos confirmados" : d.name}</span>
                 </label>
               ))}
             </div>
@@ -939,7 +937,7 @@ function CP_SCurveChart({ phases }) {
 }
 
 function CP_BudgetChart({ phases }) {
-  const data = phases.map((p) => ({ name: p.shortName, planificado: p.budgetPlanned, real: p.budgetActual }));
+  const data = phases.map((p) => ({ name: p.shortName, planificado: p.weight, real: Math.round(p.weight * (p.progress || 0)) / 100 }));
   const W = 620, H = 230, padL = 44, padR = 14, padT = 18, padB = 26;
   const chartW = W - padL - padR, chartH = H - padT - padB;
   const max = Math.max(1, ...data.flatMap((d) => [d.planificado, d.real]));
@@ -950,9 +948,9 @@ function CP_BudgetChart({ phases }) {
   const x0 = (i) => padL + i * slot + (slot - (barW * 2 + gap)) / 2;
   const hAt = (v) => (Math.max(v, 0) / max) * chartH;
   const ticks = [0, 0.5, 1].map((f) => Math.round(max * f));
-  const fmtK = (v) => "$" + Math.round(v / 1000) + "k";
+  const fmtK = (v) => Math.round(v) + "%";
   return (
-    <svg viewBox={"0 0 " + W + " " + H} width="100%" height="230" role="img" aria-label="Presupuesto planificado versus real por fase">
+    <svg viewBox={"0 0 " + W + " " + H} width="100%" height="230" role="img" aria-label="Peso de cada fase versus avance logrado">
       {ticks.map((t, i) => {
         const y = padT + chartH - (t / max) * chartH;
         return (
@@ -964,23 +962,23 @@ function CP_BudgetChart({ phases }) {
       })}
       {data.map((d, i) => {
         const hp = hAt(d.planificado), hr = hAt(d.real);
-        const over = d.real > d.planificado * 1.05;
+        const over = false;
         return (
           <g key={i}>
             <rect x={x0(i)} y={padT + chartH - hp} width={barW} height={hp} fill={COLORS.steel} rx="2">
-              <title>{d.name + " planificado: " + money(d.planificado)}</title>
+              <title>{d.name + " peso: " + d.planificado + "%"}</title>
             </rect>
             <rect x={x0(i) + barW + gap} y={padT + chartH - hr} width={barW} height={hr} fill={over ? COLORS.red : COLORS.amber} rx="2">
-              <title>{d.name + " real: " + money(d.real)}</title>
+              <title>{d.name + " logrado: " + d.real + "%"}</title>
             </rect>
             <text x={padL + i * slot + slot / 2} y={H - 6} textAnchor="middle" fontSize="9" fill="var(--text-400)">{d.name}</text>
           </g>
         );
       })}
       <rect x={W - 172} y="7" width="9" height="9" fill={COLORS.steel} />
-      <text x={W - 159} y="15" fontSize="9" fill="var(--text-600)">Planificado</text>
+      <text x={W - 159} y="15" fontSize="9" fill="var(--text-600)">Peso</text>
       <rect x={W - 82} y="7" width="9" height="9" fill={COLORS.amber} />
-      <text x={W - 69} y="15" fontSize="9" fill="var(--text-600)">Real</text>
+      <text x={W - 69} y="15" fontSize="9" fill="var(--text-600)">Logrado</text>
     </svg>
   );
 }
@@ -1062,14 +1060,14 @@ function CP_ExecutiveReport({ project, rag, milestones }) {
             </span>
           )}
           <RagDot level={rag.level} />
-          <span className="text-sm" style={{ color: "var(--text-400)" }}>· Avance físico {rag.avanceFisico}% · Ejecución presupuestaria {rag.avancePresupuestario}%</span>
+          <span className="text-sm" style={{ color: "var(--text-400)" }}>· Avance físico {rag.avanceFisico}% · {rag.incOpen} incidencia(s) abierta(s)</span>
         </div>
       </div>
       <Panel className="mb-6">
         <PanelHeader title="Resumen ejecutivo" />
         <p className="text-sm leading-relaxed" style={{ color: "var(--text-900)" }}>
           El proyecto <strong>{project.name}</strong> para <strong>{project.client}</strong> registra un avance físico del <strong>{rag.avanceFisico}%</strong>,
-          con una ejecución presupuestaria del <strong>{rag.avancePresupuestario}%</strong> sobre un presupuesto planificado de <strong>{money(rag.planned)}</strong>.
+          y {rag.incOpen} incidencia(s) abierta(s).
           {rag.lateCount > 0 ? ` Se identifican ${rag.lateCount} fase(s) con retraso respecto al cronograma planificado.` : " El cronograma se mantiene dentro de lo planificado."}
           {criticalRisks.length > 0 ? ` Existen ${criticalRisks.length} riesgo(s) de nivel alto que requieren atención inmediata.` : " No hay riesgos de nivel alto abiertos en este momento."}
         </p>
@@ -1078,7 +1076,7 @@ function CP_ExecutiveReport({ project, rag, milestones }) {
         <PanelHeader title="Estado por fase" />
         <table className="w-full text-sm">
           <thead><tr className="text-left" style={{ color: "var(--text-400)" }}>
-            <th className="font-medium pb-2">Fase</th><th className="font-medium pb-2">Responsable</th><th className="font-medium pb-2">Estado</th><th className="font-medium pb-2">Avance</th><th className="font-medium pb-2">Fin planificado</th><th className="font-medium pb-2">Presupuesto</th>
+            <th className="font-medium pb-2">Fase</th><th className="font-medium pb-2">Responsable</th><th className="font-medium pb-2">Estado</th><th className="font-medium pb-2">Avance</th><th className="font-medium pb-2">Fin planificado</th><th className="font-medium pb-2">Observaciones</th>
           </tr></thead>
           <tbody>
             {project.phases.map((p) => (
@@ -1088,7 +1086,7 @@ function CP_ExecutiveReport({ project, rag, milestones }) {
                 <td className="py-1.5"><span className="risk-pill" style={{ background: CP_STATUS_META[p.status].bg, color: CP_STATUS_META[p.status].fg }}>{CP_STATUS_META[p.status].label}</span></td>
                 <td className="py-1.5" style={{ color: "var(--text-600)" }}>{p.progress}%</td>
                 <td className="py-1.5" style={{ color: "var(--text-600)" }}>{fdate(p.plannedEnd)}</td>
-                <td className="py-1.5" style={{ color: "var(--text-600)" }}>{money(p.budgetActual)} / {money(p.budgetPlanned)}</td>
+                <td className="py-1.5" style={{ color: "var(--text-600)" }}>{p.notes || "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -1147,9 +1145,6 @@ function CP_exportProjectExcel(project, rag, milestones, points, recs) {
     "Fecha de inicio": project.startDate ? fdate(project.startDate) : "",
     "Estado general": rag.level === "rojo" ? "Crítico" : rag.level === "amarillo" ? "Atención" : "En control",
     "Avance físico (%)": rag.avanceFisico,
-    "Ejecución presupuestaria (%)": rag.avancePresupuestario,
-    "Presupuesto planificado (USD)": rag.planned,
-    "Presupuesto ejecutado (USD)": rag.actual,
     "Fecha del informe": fdate(todayISO()),
     "Notas": project.notes || "",
   }];
@@ -1166,8 +1161,7 @@ function CP_exportProjectExcel(project, rag, milestones, points, recs) {
     "Inicio planificado": fdate(p.plannedStart),
     "Fin planificado": fdate(p.plannedEnd),
     "Fin real": p.actualEnd ? fdate(p.actualEnd) : "",
-    "Presupuesto planificado (USD)": p.budgetPlanned,
-    "Presupuesto ejecutado (USD)": p.budgetActual,
+    "Observaciones": p.notes || "",
   }));
   const wsFases = XLSX.utils.json_to_sheet(fases);
   wsFases["!cols"] = [{ wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 22 }, { wch: 22 }];
@@ -1218,9 +1212,6 @@ function CP_exportPortfolioExcel(projects) {
       "Responsable": p.manager || "",
       "Estado": r.level === "rojo" ? "Crítico" : r.level === "amarillo" ? "Atención" : "En control",
       "Avance físico (%)": r.avanceFisico,
-      "Ejecución presupuestaria (%)": r.avancePresupuestario,
-      "Presupuesto planificado (USD)": r.planned,
-      "Presupuesto ejecutado (USD)": r.actual,
       "Riesgos altos abiertos": r.highOpen,
       "Riesgos medios abiertos": r.medOpen,
     };
@@ -1256,14 +1247,14 @@ function CP_ReportingSection({ project, rag, milestones, projects }) {
       </div>
       <Panel>
         <PanelHeader title={"Informe completo — " + project.name} />
-        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Cinco hojas en un solo archivo: Resumen ejecutivo, Fases (con responsable, avance y presupuesto), Riesgos, Hitos, y Análisis (recomendaciones y puntos a revisar como gerencia).</p>
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Cinco hojas en un solo archivo: Resumen ejecutivo, Fases (con responsable, avance y observaciones), Riesgos, Hitos, y Análisis (recomendaciones y puntos a revisar como gerencia).</p>
         <button onClick={downloadProject} className="btn-primary flex items-center gap-2" disabled={downloading === "project"} style={{ display: "inline-flex" }}>
           <Download size={14} />{downloading === "project" ? "Generando…" : "Descargar Excel del proyecto"}
         </button>
       </Panel>
       <Panel>
         <PanelHeader title="Portafolio completo" />
-        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Una fila por proyecto con estado, avance, ejecución presupuestaria y riesgos abiertos — ideal para una vista comparativa de todos los proyectos activos.</p>
+        <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Una fila por proyecto con estado, avance, incidencias y riesgos abiertos — ideal para una vista comparativa de todos los proyectos activos.</p>
         <button onClick={downloadPortfolio} className="btn-ghost flex items-center gap-2" disabled={downloading === "portfolio"} style={{ display: "inline-flex" }}>
           <Download size={14} />{downloading === "portfolio" ? "Generando…" : "Descargar Excel del portafolio (" + projects.length + (projects.length === 1 ? " proyecto)" : " proyectos)")}
         </button>
@@ -1367,7 +1358,7 @@ function CP_Module({ projects, updateProject, createProject, deleteProject, focu
               </Panel>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Panel><PanelHeader title="Curva S — avance planificado vs. real" /><CP_SCurveChart phases={project.phases} /></Panel>
-                <Panel><PanelHeader title="Presupuesto por fase" /><CP_BudgetChart phases={project.phases} /></Panel>
+                <Panel><PanelHeader title="Peso y avance logrado por fase" /><CP_BudgetChart phases={project.phases} /></Panel>
               </div>
               <Panel>
                 <PanelHeader title="Riesgos" />
@@ -3700,7 +3691,7 @@ function OT_buildRows(orders) {
 function OT_blank(orders) {
   const max = orders.reduce((m, o) => Math.max(m, num(o.number)), 0);
   return {
-    id: uid(), number: max + 1, issueDate: todayISO(), projectId: "", calItemId: "", resource: "", name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "",
+    id: uid(), number: max + 1, issueDate: todayISO(), projectId: "", calItemId: "", resource: "", name: "", client: "", type: "Orden de trabajo", projectId: "", place: "", coordinator: "", description: "", requirements: "",
     budgetMaterials: "", budgetTransport: "", budgetLabor: "",
     actualMaterials: "", actualTransport: "", actualLabor: "",
     plannedStart: todayISO(), plannedEnd: "", authorizedDays: "", realStart: "", realEnd: "", staff: "", notes: "",
@@ -3831,6 +3822,7 @@ function OT_Form({ initial, isNew, cpProjects, onSave, onCancel }) {
             <div><label className="field-label">Responsable / coordinador</label><input className="field" value={f.coordinator} onChange={set("coordinator")} /></div>
           </div>
           <div><label className="field-label">Descripción y alcance del trabajo</label><textarea className="field" rows={6} value={f.description} onChange={set("description")} placeholder="Alcance, materiales, procesos, notas…" /></div>
+          <div><label className="field-label">Requerimientos para construcción (materiales especiales, EPP, permisos, equipos, accesos, condiciones del cliente)</label><textarea className="field" rows={4} value={f.requirements || ""} onChange={set("requirements")} placeholder="Todo lo que el área de construcción necesita saber o gestionar antes de iniciar" /></div>
         </div>
       </OT_Section>
 
@@ -4998,24 +4990,21 @@ function RES_ProjectBars({ rows, onOpen }) {
     <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
       <div className="flex items-center gap-4 text-xs" style={{ color: "var(--text-600)" }}>
         <span className="flex items-center gap-1"><span style={{ width: 10, height: 6, background: COLORS.green, borderRadius: 2 }} />Avance físico</span>
-        <span className="flex items-center gap-1"><span style={{ width: 10, height: 6, background: COLORS.ink, borderRadius: 2 }} />Presupuesto ejecutado</span>
+        
       </div>
       {list.map((r) => {
         const est = RES_ESTADOS.find((e) => e.key === r.estado);
-        const over = r.ejecPct - r.avance > 15;
+        const over = false;
         return (
           <div key={r.id} style={{ cursor: "pointer" }} onClick={() => onOpen(r.id)}>
             <div className="flex items-center justify-between text-xs mb-1 gap-2">
               <span className="truncate flex items-center gap-1.5" style={{ color: "var(--text-900)", fontWeight: 500 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: est.color, flexShrink: 0 }} />{r.name}
               </span>
-              <span className="shrink-0" style={{ color: over ? COLORS.red : "var(--text-400)" }}>{r.avance}% · {r.ejecPct}%</span>
+              <span className="shrink-0" style={{ color: over ? COLORS.red : "var(--text-400)" }}>{r.avance}%</span>
             </div>
             <div style={{ height: 6, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden", marginBottom: 2 }}>
               <div style={{ height: "100%", width: Math.min(100, r.avance) + "%", background: COLORS.green }} />
-            </div>
-            <div style={{ height: 6, borderRadius: 999, background: "var(--steel-100)", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: Math.min(100, r.ejecPct) + "%", background: over ? COLORS.red : COLORS.ink }} />
             </div>
           </div>
         );
@@ -5865,29 +5854,30 @@ function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, g
     const list = (proyectos || []).filter((p) => { const d = CP_projectDates(p).start; return month === "todos" && year === "todos" ? true : inP(d); });
     const est = RES_ESTADOS.map((e) => ({ label: e.label, value: list.filter((p) => CP_projectState(p) === e.key).length, color: e.color, text: String(list.filter((p) => CP_projectState(p) === e.key).length) }));
     const avg = list.length ? Math.round(list.reduce((a, p) => a + CP_computeProgress(p.phases || []), 0) / list.length) : 0;
-    const bud = list.reduce((a, p) => { const t = CP_computeBudgetTotals(p.phases || []); return { p: a.p + t.planned, r: a.r + t.actual }; }, { p: 0, r: 0 });
-    const data = list.map((p) => ({ label: p.name.length > 16 ? p.name.slice(0, 15) + "…" : p.name, a: CP_computeProgress(p.phases || []), b: CP_computeRag(p).avancePresupuestario }));
+    const incO = list.reduce((a, p) => a + CP_computeRag(p).incOpen, 0);
+    const data = list.map((p) => ({ label: p.name.length > 16 ? p.name.slice(0, 15) + "…" : p.name, a: CP_computeProgress(p.phases || []) }));
     const crit = list.filter((p) => CP_projectState(p) === "critico");
+    const late = list.reduce((a, p) => a + CP_computeRag(p).lateCount, 0);
     const ins = [{ tone: "good", text: `${list.length} proyecto(s) con avance físico promedio de ${avg}%.` }];
-    if (crit.length) ins.push({ tone: "bad", text: `Proyectos críticos: ${crit.map((p) => p.name).slice(0, 4).join(", ")}. Revisa fases atrasadas y riesgos altos abiertos.` });
-    const gap = list.filter((p) => CP_computeRag(p).budgetGap > 10);
-    if (gap.length) ins.push({ tone: "warn", text: `${gap.length} proyecto(s) gastan más rápido de lo que avanzan (brecha presupuesto vs. avance > 10 puntos).` });
-    if (!crit.length && !gap.length && list.length) ins.push({ tone: "good", text: "Ningún proyecto presenta alertas críticas ni brechas de presupuesto." });
+    if (crit.length) ins.push({ tone: "bad", text: `Proyectos críticos: ${crit.map((p) => p.name).slice(0, 4).join(", ")}. Revisa fases atrasadas, riesgos e incidencias altas abiertas.` });
+    if (late) ins.push({ tone: "warn", text: `${late} fase(s) atrasadas respecto a su fecha planificada.` });
+    if (incO) ins.push({ tone: "warn", text: `${incO} incidencia(s) de construcción abiertas.` });
+    if (!crit.length && !late && !incO && list.length) ins.push({ tone: "good", text: "Ningún proyecto presenta alertas críticas, fases atrasadas ni incidencias abiertas." });
     return (
       <div className="space-y-5">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <DKpi color="#0EA5A4" icon="🏗️" label="Proyectos" value={list.length} sub={est[0].value + " culminados"} />
           <DKpi color="#16A34A" icon="📈" label="Avance físico promedio" value={avg} fmt={(v) => Math.round(v) + "%"} sub="ponderado por fases" delay={60} />
           <DKpi color="#EF4444" icon="🚨" label="Críticos" value={crit.length} sub={est[2].value + " en atención"} delay={120} />
-          <DKpi color="#7C3AED" icon="💵" label="Presupuesto de fases" value={bud.p} fmt={fm} sub={"ejecutado " + money(bud.r)} delay={180} />
+          <DKpi color="#F59E0B" icon="⚠️" label="Incidencias abiertas" value={incO} sub={late + " fases atrasadas"} delay={180} />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DPanel title="Estado de los proyectos"><ADonut ready={ready} items={est} center={{ big: String(list.length), small: "proyectos" }} /></DPanel>
           <DPanel title="Avance promedio"><div className="flex justify-center"><AGauge ready={ready} value={avg} label="avance físico" color={VIV.teal} /></div></DPanel>
         </div>
-        <DPanel title="Avance físico vs. avance presupuestario por proyecto"><ABars ready={ready} data={data} names={["Avance físico %", "Presupuesto consumido %"]} colors={[VIV.teal, VIV.orange]} fmt={(v) => Math.round(v) + "%"} /></DPanel>
-        <DPanel title="Detalle por proyecto"><DTable head={["Proyecto", "Cliente", "Inicio", "Avance", "Fases atrasadas", "Plan. $", "Real $", "Semáforo"]} align={["left", "left", "left", "right", "right", "right", "right", "left"]}
-          rows={list.map((p) => { const g = CP_computeRag(p); const st = CP_projectState(p); return [p.name, p.client || "—", CP_projectDates(p).start ? fdate(CP_projectDates(p).start) : "—", g.avanceFisico + "%", g.lateCount, money(g.planned), money(g.actual), { v: st === "culminado" ? "● Culminado" : g.level === "rojo" ? "● Crítico" : g.level === "amarillo" ? "● Atención" : "● En control", color: st === "culminado" || g.level === "verde" ? COLORS.green : g.level === "rojo" ? COLORS.red : COLORS.amberDark }]; })} /></DPanel>
+        <DPanel title="Avance físico por proyecto"><ABars ready={ready} data={data} colors={[VIV.teal]} fmt={(v) => Math.round(v) + "%"} /></DPanel>
+        <DPanel title="Detalle por proyecto"><DTable head={["Proyecto", "Cliente", "Inicio", "Avance", "Fases atrasadas", "Incidencias", "Semáforo"]} align={["left", "left", "left", "right", "right", "right", "left"]}
+          rows={list.map((p) => { const g = CP_computeRag(p); const st = CP_projectState(p); return [p.name, p.client || "—", CP_projectDates(p).start ? fdate(CP_projectDates(p).start) : "—", g.avanceFisico + "%", g.lateCount, g.incOpen, { v: st === "culminado" ? "● Culminado" : g.level === "rojo" ? "● Crítico" : g.level === "amarillo" ? "● Atención" : "● En control", color: st === "culminado" || g.level === "verde" ? COLORS.green : g.level === "rojo" ? COLORS.red : COLORS.amberDark }]; })} /></DPanel>
         <DPanel title="Lectura gerencial"><V_Insights items={ins} /></DPanel>
       </div>
     );
@@ -6457,6 +6447,305 @@ function PRO_Module({ data, setData }) {
   );
 }
 
+/* ===== MODULO: CONSTRUCCION ===== */
+const CON_TIPOS = ["Calidad / no conformidad", "Seguridad y EPP", "Material faltante o defectuoso", "Retrabajo", "Equipo o herramienta", "Cliente / acceso al sitio", "Diseño / planos", "Clima o fuerza mayor", "Otro"];
+const CON_SEV = [{ key: "alta", label: "Alta", color: "#EF4444" }, { key: "media", label: "Media", color: "#F59E0B" }, { key: "baja", label: "Baja", color: "#16A34A" }];
+const CON_EST = [{ key: "abierta", label: "Abierta", color: "#EF4444" }, { key: "proceso", label: "En proceso", color: "#F59E0B" }, { key: "cerrada", label: "Cerrada", color: "#16A34A" }];
+const con_sev = (k) => CON_SEV.find((x) => x.key === k) || CON_SEV[1];
+const con_est = (k) => CON_EST.find((x) => x.key === k) || CON_EST[0];
+const CON_ACCENT = "#0EA5A4";
+
+function con_curPhase(p) {
+  const ph = p.phases || [];
+  return ph.find((x) => x.status === "en_curso") || ph.find((x) => x.status !== "completado") || ph[ph.length - 1] || null;
+}
+function con_row(p, orders) {
+  const o = (orders || []).find((x) => x.id === p.otId) || null;
+  const rag = CP_computeRag(p);
+  const phs = p.phases || [];
+  const delivery = (o && o.plannedEnd) || (phs.length ? phs[phs.length - 1].plannedEnd : "") || "";
+  const done = CP_projectState(p) === "culminado";
+  const daysLeft = delivery ? daysBetween(todayISO(), delivery) : null;
+  const incs = p.incidents || [], log = p.logbook || [];
+  return { p, o, rag, cur: con_curPhase(p), delivery, daysLeft, done, avance: rag.avanceFisico, incs, incOpen: rag.incOpen, hh: log.reduce((a, e) => a + num(e.hours), 0), days: log.length };
+}
+
+function CON_Info({ r }) {
+  const { p, o } = r;
+  const Item = (k, v, span) => (<div className={span || ""}><p className="text-[11px] uppercase font-semibold" style={{ color: "var(--text-400)", letterSpacing: "0.05em" }}>{k}</p><p className="text-sm" style={{ color: "var(--text-900)", whiteSpace: "pre-wrap" }}>{v || "—"}</p></div>);
+  const late = r.daysLeft !== null && r.daysLeft < 0 && !r.done;
+  return (
+    <Panel>
+      <PanelHeader title={"Datos de la orden de trabajo" + (o ? " N.º " + o.number : "")} right={<span className="text-xs" style={{ color: "var(--text-400)" }}>{o ? "Se editan en Órdenes de trabajo" : "Proyecto sin orden vinculada"}</span>} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Item("Cliente", p.client)}{Item("Lugar de ejecución", o && o.place)}{Item("Responsable / coordinador", (o && o.coordinator) || p.manager)}{Item("Personal asignado", o && o.staff)}
+        {Item("Fecha de emisión", o && o.issueDate ? fdate(o.issueDate) : "")}{Item("Inicio", (o && o.plannedStart) ? fdate(o.plannedStart) : fdate(CP_projectDates(p).start))}
+        <div><p className="text-[11px] uppercase font-semibold" style={{ color: "var(--text-400)", letterSpacing: "0.05em" }}>Fecha de entrega</p><p className="text-sm font-semibold" style={{ color: late ? COLORS.red : "var(--text-900)" }}>{r.delivery ? fdate(r.delivery) : "—"}{r.done ? " · entregado" : r.daysLeft !== null ? (r.daysLeft < 0 ? " · vencida hace " + -r.daysLeft + " d" : " · faltan " + r.daysLeft + " d") : ""}</p></div>
+        {Item("Plazo autorizado", o && o.authorizedDays ? o.authorizedDays + " días" : "")}
+        {Item("Descripción y alcance", o && o.description, "col-span-2 md:col-span-2")}{Item("Requerimientos para construcción", o && o.requirements, "col-span-2 md:col-span-2")}
+        {o && o.notes ? Item("Notas de la orden", o.notes, "col-span-2 md:col-span-4") : null}
+      </div>
+    </Panel>
+  );
+}
+
+function CON_Incidents({ project, update }) {
+  const blank = () => ({ date: todayISO(), phaseId: "", type: CON_TIPOS[0], severity: "media", status: "abierta", description: "", owner: "", action: "", dueDate: "" });
+  const [f, setF] = useState(blank()); const [show, setShow] = useState(false); const [err, setErr] = useState("");
+  const list = (project.incidents || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = () => { if (!f.description.trim()) { setErr("Describe la incidencia."); return; } setErr(""); update({ incidents: [{ id: uid(), ...f }, ...(project.incidents || [])] }); setF(blank()); setShow(false); };
+  const patch = (id, ch) => update({ incidents: (project.incidents || []).map((i) => (i.id === id ? { ...i, ...ch } : i)) });
+  const open = list.filter((i) => i.status !== "cerrada").length;
+  return (
+    <Panel>
+      <PanelHeader title={"Incidencias de construcción · " + open + " abierta(s) de " + list.length} right={<button className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1" style={{ display: "inline-flex" }} onClick={() => setShow(!show)}><Plus size={13} />Nueva incidencia</button>} />
+      {show && (
+        <div className="p-4 rounded mb-4 space-y-3" style={{ background: "var(--paper)", border: "1px solid var(--steel-200)" }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div><label className="field-label">Fecha</label><input type="date" className="field" value={f.date} onChange={set("date")} /></div>
+            <div><label className="field-label">Fase</label><select className="field" value={f.phaseId} onChange={set("phaseId")}><option value="">General</option>{(project.phases || []).map((ph) => <option key={ph.id} value={ph.id}>{ph.shortName}</option>)}</select></div>
+            <div className="col-span-2"><label className="field-label">Tipo</label><select className="field" value={f.type} onChange={set("type")}>{CON_TIPOS.map((t) => <option key={t}>{t}</option>)}</select></div>
+            <div><label className="field-label">Severidad</label><select className="field" value={f.severity} onChange={set("severity")}>{CON_SEV.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+            <div><label className="field-label">Estado</label><select className="field" value={f.status} onChange={set("status")}>{CON_EST.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+            <div><label className="field-label">Responsable</label><input className="field" value={f.owner} onChange={set("owner")} /></div>
+            <div><label className="field-label">Compromiso de cierre</label><input type="date" className="field" value={f.dueDate} onChange={set("dueDate")} /></div>
+            <div className="col-span-2 md:col-span-2"><label className="field-label">Descripción</label><textarea className="field" rows={3} value={f.description} onChange={set("description")} placeholder="Qué pasó, dónde y qué afecta" /></div>
+            <div className="col-span-2 md:col-span-2"><label className="field-label">Acción correctiva</label><textarea className="field" rows={3} value={f.action} onChange={set("action")} placeholder="Qué se hará para resolverla" /></div>
+          </div>
+          {err && <p className="text-sm" style={{ color: COLORS.red }}>{err}</p>}
+          <div className="flex gap-2"><button className="btn-primary text-xs py-1.5 px-3" onClick={save}>Guardar incidencia</button><button className="btn-ghost text-xs py-1.5 px-3" onClick={() => setShow(false)}>Cancelar</button></div>
+        </div>
+      )}
+      <div className="overflow-x-auto"><table className="w-full text-sm">
+        <thead><tr className="text-left text-xs" style={{ color: "var(--text-400)" }}>{["Fecha", "Fase", "Tipo", "Sev.", "Descripción / acción", "Responsable", "Cierre", "Estado", ""].map((h, i) => <th key={i} className="font-medium pb-2 pr-3">{h}</th>)}</tr></thead>
+        <tbody>
+          {list.map((i) => { const ph = (project.phases || []).find((x) => x.id === i.phaseId); const s = con_sev(i.severity), e = con_est(i.status); const over = i.status !== "cerrada" && i.dueDate && i.dueDate < todayISO(); return (
+            <tr key={i.id} style={{ borderTop: "1px solid var(--steel-100)", verticalAlign: "top" }}>
+              <td className="py-2 pr-3 whitespace-nowrap">{fdate(i.date)}</td><td className="py-2 pr-3">{ph ? ph.shortName : "General"}</td><td className="py-2 pr-3">{i.type}</td>
+              <td className="py-2 pr-3"><span className="risk-pill" style={{ background: s.color + "22", color: s.color }}>{s.label}</span></td>
+              <td className="py-2 pr-3" style={{ minWidth: 220 }}>{i.description}{i.action ? <div className="text-xs" style={{ color: "var(--text-400)" }}>Acción: {i.action}</div> : null}</td>
+              <td className="py-2 pr-3">{i.owner || "—"}</td>
+              <td className="py-2 pr-3 whitespace-nowrap" style={{ color: over ? COLORS.red : "var(--text-600)" }}>{i.status === "cerrada" ? (i.closedDate ? fdate(i.closedDate) : "—") : i.dueDate ? fdate(i.dueDate) + (over ? " · vencida" : "") : "—"}</td>
+              <td className="py-2 pr-3"><select className="field" style={{ width: 118, fontWeight: 700, color: e.color, borderColor: e.color }} value={i.status} onChange={(ev) => patch(i.id, { status: ev.target.value, closedDate: ev.target.value === "cerrada" ? todayISO() : "" })}>{CON_EST.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></td>
+              <td className="py-2"><button aria-label="Eliminar" style={{ color: COLORS.red }} onClick={() => update({ incidents: (project.incidents || []).filter((x) => x.id !== i.id) })}><Trash2 size={14} /></button></td>
+            </tr>); })}
+          {list.length === 0 && <tr><td colSpan={9} className="py-3 text-sm" style={{ color: "var(--text-400)" }}>Sin incidencias registradas. Registra aquí cualquier novedad de calidad, seguridad, material, retrabajo o clima.</td></tr>}
+        </tbody></table></div>
+    </Panel>
+  );
+}
+
+function CON_Logbook({ project, update }) {
+  const blank = () => ({ date: todayISO(), phaseId: (con_curPhase(project) || {}).id || "", people: "", hours: "", activities: "", notes: "" });
+  const [f, setF] = useState(blank()); const [err, setErr] = useState("");
+  const list = (project.logbook || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = () => { if (!f.activities.trim()) { setErr("Escribe las actividades realizadas."); return; } setErr(""); update({ logbook: [{ id: uid(), ...f }, ...(project.logbook || [])] }); setF(blank()); };
+  const hh = list.reduce((a, e) => a + num(e.hours), 0);
+  return (
+    <div className="space-y-5">
+      <Panel>
+        <PanelHeader title="Nueva entrada de bitácora diaria" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div><label className="field-label">Fecha</label><input type="date" className="field" value={f.date} onChange={set("date")} /></div>
+          <div><label className="field-label">Fase</label><select className="field" value={f.phaseId} onChange={set("phaseId")}><option value="">General</option>{(project.phases || []).map((ph) => <option key={ph.id} value={ph.id}>{ph.shortName}</option>)}</select></div>
+          <div><label className="field-label">Personal en obra / taller</label><DecimalInput className="field" value={f.people} onChange={(v) => setF({ ...f, people: v })} placeholder="0" /></div>
+          <div><label className="field-label">Horas-hombre del día</label><DecimalInput className="field" value={f.hours} onChange={(v) => setF({ ...f, hours: v })} placeholder="0" /></div>
+          <div className="col-span-2 md:col-span-2"><label className="field-label">Actividades realizadas</label><textarea className="field" rows={3} value={f.activities} onChange={set("activities")} placeholder="Corte, soldadura, ensamble, montaje, pruebas…" /></div>
+          <div className="col-span-2 md:col-span-2"><label className="field-label">Observaciones / pendientes</label><textarea className="field" rows={3} value={f.notes} onChange={set("notes")} /></div>
+        </div>
+        {err && <p className="text-sm mt-2" style={{ color: COLORS.red }}>{err}</p>}
+        <button className="btn-primary text-xs py-1.5 px-3 mt-3" onClick={save}>Guardar entrada</button>
+      </Panel>
+      <Panel>
+        <PanelHeader title={"Bitácora · " + list.length + " día(s) · " + Math.round(hh * 10) / 10 + " horas-hombre"} />
+        <div className="space-y-3">
+          {list.map((e) => { const ph = (project.phases || []).find((x) => x.id === e.phaseId); return (
+            <div key={e.id} className="p-3 rounded flex gap-3 justify-between" style={{ border: "1px solid var(--steel-200)" }}>
+              <div className="min-w-0"><p className="text-xs" style={{ color: "var(--text-400)" }}><strong style={{ color: "var(--text-900)" }}>{fdate(e.date)}</strong> · {ph ? ph.shortName : "General"} · {num(e.people)} persona(s) · {num(e.hours)} HH</p>
+                <p className="text-sm mt-1" style={{ whiteSpace: "pre-wrap" }}>{e.activities}</p>{e.notes ? <p className="text-xs mt-1" style={{ color: "var(--text-600)", whiteSpace: "pre-wrap" }}>Obs.: {e.notes}</p> : null}</div>
+              <button aria-label="Eliminar" className="shrink-0" style={{ color: COLORS.red }} onClick={() => update({ logbook: (project.logbook || []).filter((x) => x.id !== e.id) })}><Trash2 size={14} /></button>
+            </div>); })}
+          {list.length === 0 && <p className="text-sm" style={{ color: "var(--text-400)" }}>Aún no hay entradas. Registra cada día lo trabajado: sirve de respaldo y alimenta el dashboard de horas-hombre.</p>}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function CON_recs(rows) {
+  const act = rows.filter((r) => !r.done);
+  const out = [];
+  if (!act.length) return [{ tone: "good", text: "No hay proyectos de construcción activos." }];
+  const avg = Math.round(act.reduce((a, r) => a + r.avance, 0) / act.length);
+  out.push({ tone: "good", text: `${act.length} proyecto(s) activo(s) con avance físico promedio de ${avg}%.` });
+  const venc = act.filter((r) => r.daysLeft !== null && r.daysLeft < 0), prox = act.filter((r) => r.daysLeft !== null && r.daysLeft >= 0 && r.daysLeft <= 7);
+  if (venc.length) out.push({ tone: "bad", text: `${venc.length} proyecto(s) pasaron su fecha de entrega: ${venc.slice(0, 3).map((r) => r.p.name).join(", ")}. Acordar nueva fecha con el cliente.` });
+  if (prox.length) out.push({ tone: "warn", text: `${prox.length} entrega(s) en los próximos 7 días: ${prox.slice(0, 3).map((r) => r.p.name + " (" + r.avance + "%)").join(", ")}.` });
+  const riesgo = act.filter((r) => r.daysLeft !== null && r.daysLeft >= 0 && r.daysLeft <= 14 && r.avance < 50);
+  if (riesgo.length) out.push({ tone: "bad", text: `Riesgo de incumplir: ${riesgo.map((r) => r.p.name).slice(0, 3).join(", ")} entregan en 14 días o menos con menos de 50% de avance.` });
+  const late = act.reduce((a, r) => a + r.rag.lateCount, 0);
+  if (late) out.push({ tone: "warn", text: `${late} fase(s) atrasadas respecto a la fecha planificada.` });
+  const hi = act.reduce((a, r) => a + r.rag.incHigh, 0), io = act.reduce((a, r) => a + r.incOpen, 0);
+  if (io) out.push({ tone: hi ? "bad" : "warn", text: `${io} incidencia(s) abiertas${hi ? ", " + hi + " de severidad alta" : ""}. Cierre con responsable y fecha.` });
+  const sinBit = act.filter((r) => r.cur && r.cur.status === "en_curso" && r.days === 0);
+  if (sinBit.length) out.push({ tone: "warn", text: `${sinBit.length} proyecto(s) en ejecución sin entradas de bitácora.` });
+  if (out.length === 1) out.push({ tone: "good", text: "Sin entregas vencidas, fases atrasadas ni incidencias abiertas." });
+  return out;
+}
+
+function CON_Dashboard({ rows }) {
+  const [soloAct, setSoloAct] = useState(true);
+  const list = rows.filter((r) => !soloAct || !r.done);
+  const ready = useReady(soloAct + "-" + list.length);
+  const yr = new Date().getFullYear();
+  const avg = list.length ? Math.round(list.reduce((a, r) => a + r.avance, 0) / list.length) : 0;
+  const incs = list.flatMap((r) => r.incs.map((i) => ({ ...i, proj: r.p.name })));
+  const openInc = incs.filter((i) => i.status !== "cerrada");
+  const hh = Math.round(list.reduce((a, r) => a + r.hh, 0) * 10) / 10;
+  const venc = list.filter((r) => !r.done && r.daysLeft !== null && r.daysLeft < 0).length, prox = list.filter((r) => !r.done && r.daysLeft !== null && r.daysLeft >= 0 && r.daysLeft <= 7).length;
+  const byPhase = (() => { const m = {}; list.filter((r) => !r.done).forEach((r) => { const k = r.cur ? r.cur.shortName : "—"; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([label, value], i) => ({ label, value, color: VIV_LIST[i % VIV_LIST.length], text: String(value) })); })();
+  const bySev = CON_SEV.map((s) => ({ label: s.label, value: openInc.filter((i) => i.severity === s.key).length, color: s.color, text: String(openInc.filter((i) => i.severity === s.key).length) }));
+  const byTipo = (() => { const m = {}; incs.forEach((i) => { m[i.type] = (m[i.type] || 0) + 1; }); return Object.entries(m).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value); })();
+  const byMes = RES_MESES.map((l, i) => ({ label: l, a: incs.filter((x) => (x.date || "").slice(0, 4) === String(yr) && Number((x.date || "").slice(5, 7)) === i + 1).length, b: incs.filter((x) => x.status === "cerrada" && (x.closedDate || "").slice(0, 4) === String(yr) && Number((x.closedDate || "").slice(5, 7)) === i + 1).length }));
+  const hhProj = list.filter((r) => r.hh > 0).map((r) => ({ label: r.p.name, value: Math.round(r.hh * 10) / 10 })).sort((a, b) => b.value - a.value);
+  const proxList = list.filter((r) => !r.done).sort((a, b) => (a.delivery || "9999") < (b.delivery || "9999") ? -1 : 1);
+  return (
+    <div className="space-y-5">
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={soloAct} onChange={(e) => setSoloAct(e.target.checked)} />Solo proyectos activos (sin terminados)</label>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <DKpi color="#0EA5A4" icon="🏗️" label="Proyectos en construcción" value={list.length} sub={list.filter((r) => r.done).length + " terminados"} />
+        <DKpi color="#16A34A" icon="📈" label="Avance promedio" value={avg} fmt={(v) => Math.round(v) + "%"} sub="ponderado por fases" delay={60} />
+        <DKpi color="#EF4444" icon="⏰" label="Entregas vencidas" value={venc} sub={prox + " en los próximos 7 días"} delay={120} />
+        <DKpi color="#F59E0B" icon="⚠️" label="Incidencias abiertas" value={openInc.length} sub={openInc.filter((i) => i.severity === "alta").length + " de severidad alta"} delay={180} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <DPanel title="Avance general"><div className="flex justify-center"><AGauge ready={ready} value={avg} label="avance físico promedio" color={VIV.teal} /></div></DPanel>
+        <DPanel title="Proyectos por fase actual"><ADonut ready={ready} size={150} items={byPhase} center={{ big: String(byPhase.reduce((a, x) => a + x.value, 0)), small: "activos" }} /></DPanel>
+        <DPanel title="Incidencias abiertas por severidad"><ADonut ready={ready} size={150} items={bySev} center={{ big: String(openInc.length), small: "abiertas" }} /></DPanel>
+      </div>
+      <DPanel title="Avance físico por proyecto"><ABars ready={ready} data={list.map((r) => ({ label: r.p.name.length > 14 ? r.p.name.slice(0, 13) + "…" : r.p.name, a: r.avance }))} colors={[VIV.teal]} fmt={(v) => Math.round(v) + "%"} /></DPanel>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <DPanel title="Incidencias por tipo"><AHBars ready={ready} items={byTipo} /></DPanel>
+        <DPanel title={"Incidencias abiertas vs. cerradas por mes · " + yr}><ABars ready={ready} data={byMes} names={["Reportadas", "Cerradas"]} colors={[VIV.orange, VIV.green]} /></DPanel>
+        <DPanel title="Horas-hombre por proyecto (bitácora)"><AHBars ready={ready} items={hhProj} fmt={(v) => v + " HH"} /></DPanel>
+        <DPanel title="Lectura gerencial"><V_Insights items={CON_recs(list)} /></DPanel>
+      </div>
+      <DPanel title="Entregas y estado por proyecto"><DTable head={["Proyecto", "Cliente", "Fase actual", "Avance", "Entrega", "Días", "Incid.", "Semáforo"]} align={["left", "left", "left", "right", "left", "right", "right", "left"]}
+        rows={proxList.map((r) => [r.p.name, r.p.client || "—", r.cur ? r.cur.shortName : "—", r.avance + "%", r.delivery ? fdate(r.delivery) : "—", { v: r.daysLeft === null ? "—" : String(r.daysLeft), color: r.daysLeft !== null && r.daysLeft < 0 ? COLORS.red : undefined }, r.incOpen, { v: r.rag.level === "rojo" ? "● Crítico" : r.rag.level === "amarillo" ? "● Atención" : "● En control", color: r.rag.level === "rojo" ? COLORS.red : r.rag.level === "amarillo" ? COLORS.amberDark : COLORS.green }])} /></DPanel>
+    </div>
+  );
+}
+
+function CON_exportExcel(rows, onlyOne) {
+  const wb = XLSX.utils.book_new();
+  const list = onlyOne ? [onlyOne] : rows;
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.map((r) => ({ Proyecto: r.p.name, Cliente: r.p.client, "Orden N.º": r.o ? r.o.number : "", "Fase actual": r.cur ? r.cur.name : "", "Avance (%)": r.avance, Entrega: r.delivery ? fdate(r.delivery) : "", "Días a entrega": r.daysLeft === null ? "" : r.daysLeft, "Fases atrasadas": r.rag.lateCount, "Incidencias abiertas": r.incOpen, "Horas-hombre": r.hh, Estado: r.done ? "Terminado" : r.rag.level === "rojo" ? "Crítico" : r.rag.level === "amarillo" ? "Atención" : "En control" }))), "Proyectos");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.flatMap((r) => (r.p.phases || []).map((ph) => ({ Proyecto: r.p.name, Fase: ph.name, Responsable: ph.responsible || "", Estado: CP_STATUS_META[ph.status].label, "Avance (%)": ph.progress, "Peso (%)": ph.weight, "Inicio plan.": fdate(ph.plannedStart), "Fin plan.": fdate(ph.plannedEnd), "Fin real": ph.actualEnd ? fdate(ph.actualEnd) : "", Observaciones: ph.notes || "" })))), "Fases");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.flatMap((r) => r.incs.map((i) => ({ Proyecto: r.p.name, Fecha: i.date, Fase: ((r.p.phases || []).find((x) => x.id === i.phaseId) || {}).shortName || "General", Tipo: i.type, Severidad: con_sev(i.severity).label, Estado: con_est(i.status).label, Descripción: i.description, "Acción correctiva": i.action || "", Responsable: i.owner || "", "Compromiso de cierre": i.dueDate || "", "Cerrada el": i.closedDate || "" })))), "Incidencias");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.flatMap((r) => (r.p.logbook || []).map((e) => ({ Proyecto: r.p.name, Fecha: e.date, Fase: ((r.p.phases || []).find((x) => x.id === e.phaseId) || {}).shortName || "General", Personal: num(e.people), "Horas-hombre": num(e.hours), Actividades: e.activities, Observaciones: e.notes || "" })))), "Bitácora");
+  XLSX.writeFile(wb, "construccion_" + (onlyOne ? onlyOne.p.name.replace(/[^\w]+/g, "_") + "_" : "") + todayISO() + ".xlsx");
+}
+
+function CON_openReport(rows, one) {
+  const list = one ? [one] : rows.filter((r) => !r.done);
+  const incs = list.flatMap((r) => r.incs.map((i) => ({ ...i, proj: r.p.name })));
+  const open = incs.filter((i) => i.status !== "cerrada");
+  const avg = list.length ? Math.round(list.reduce((a, r) => a + r.avance, 0) / list.length) : 0;
+  const sections = [
+    { heading: "Lectura gerencial", bullets: CON_recs(list).map((x) => x.text) },
+    { heading: "Estado por proyecto", table: { head: ["Proyecto", "Cliente", "Fase actual", "Avance", "Entrega", "Incid. abiertas", "Semáforo"], align: ["left", "left", "left", "right", "left", "right", "left"], rows: list.map((r) => [r.p.name, r.p.client || "—", r.cur ? r.cur.shortName : "—", r.avance + "%", r.delivery ? fdate(r.delivery) : "—", String(r.incOpen), { v: r.done ? "Terminado" : r.rag.level === "rojo" ? "Crítico" : r.rag.level === "amarillo" ? "Atención" : "En control", color: r.rag.level === "rojo" ? "#EF4444" : r.rag.level === "amarillo" ? "#B45309" : "#16A34A" }]) } },
+  ];
+  if (one) sections.push({ heading: "Proceso por fases", table: { head: ["Fase", "Responsable", "Estado", "Avance", "Fin planificado", "Observaciones"], align: ["left", "left", "left", "right", "left", "left"], rows: (one.p.phases || []).map((ph) => [ph.name, ph.responsible || "—", CP_STATUS_META[ph.status].label, ph.progress + "%", fdate(ph.plannedEnd), ph.notes || "—"]) } });
+  sections.push({ heading: "Incidencias abiertas", table: { head: ["Proyecto", "Fecha", "Tipo", "Severidad", "Descripción", "Responsable"], align: ["left", "left", "left", "left", "left", "left"], rows: open.map((i) => [i.proj, fdate(i.date), i.type, { v: con_sev(i.severity).label, color: con_sev(i.severity).color }, i.description, i.owner || "—"]) } });
+  if (one) sections.push({ heading: "Bitácora (últimas 15 entradas)", table: { head: ["Fecha", "Personal", "HH", "Actividades"], align: ["left", "right", "right", "left"], rows: (one.p.logbook || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 15).map((e) => [fdate(e.date), String(num(e.people)), String(num(e.hours)), e.activities]) } });
+  RPT_open({ title: one ? "Construcción · " + one.p.name : "Informe de construcción", subtitle: one ? (one.p.client || "") + " · informe al " + fdate(todayISO()) : "Proyectos activos · " + fdate(todayISO()),
+    kpis: [{ label: one ? "Avance físico" : "Proyectos activos", value: one ? one.avance + "%" : String(list.length) }, { label: "Avance promedio", value: avg + "%" }, { label: "Incidencias abiertas", value: String(open.length), color: open.length ? "#EF4444" : "#16A34A" }, { label: "Horas-hombre", value: String(Math.round(list.reduce((a, r) => a + r.hh, 0) * 10) / 10) }], sections });
+}
+
+function CON_Module({ projects, orders, updateProject }) {
+  const [selId, setSelId] = useState(projects[0] ? projects[0].id : null);
+  const [tab, setTab] = useState("proceso");
+  const [filter, setFilter] = useState("activos");
+  const [expId, setExpId] = useState(null);
+  const rows = useMemo(() => projects.map((p) => con_row(p, orders)), [projects, orders]);
+  const vis = rows.filter((r) => r.p.id === selId || filter === "todos" || (filter === "activos") === !r.done);
+  useEffect(() => { if ((!selId || !projects.some((p) => p.id === selId)) && projects[0]) setSelId(projects[0].id); }, [projects, selId]);
+  const r = rows.find((x) => x.p.id === selId) || null;
+  const project = r ? r.p : null;
+  const upd = (patch) => updateProject(project.id, patch);
+  const updatePhase = (phaseId, patch) => upd({ phases: project.phases.map((ph) => (ph.id === phaseId ? { ...ph, ...patch } : ph)) });
+  const toggleDel = (phaseId, delId) => upd({ phases: project.phases.map((ph) => (ph.id !== phaseId ? ph : { ...ph, deliverables: ph.deliverables.map((d) => (d.id === delId ? { ...d, done: !d.done } : d)) })) });
+  const needsProject = tab === "proceso" || tab === "incidencias" || tab === "bitacora";
+  return (
+    <div className="space-y-6">
+      <ModuleBanner title="Construcción" subtitle="Proceso por fases, incidencias y bitácora de obra, alimentado desde la orden de trabajo" from="#0B3B3C" to="#0EA5A4" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <SubTabs tabs={[["proceso", "Proceso"], ["incidencias", "Incidencias"], ["bitacora", "Bitácora"], ["dashboard", "Dashboard"], ["reportes", "Reportes"]]} active={tab} onChange={setTab} />
+      </div>
+      {needsProject && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 flex-wrap text-xs">
+            <span style={{ color: "var(--text-400)" }}>Mostrar:</span>
+            <select className="field" style={{ width: "auto" }} value={filter} onChange={(e) => setFilter(e.target.value)}><option value="activos">En ejecución</option><option value="terminados">Terminados</option><option value="todos">Todos</option></select>
+            <span style={{ color: "var(--text-400)" }}>Los proyectos nacen al guardar una Orden de trabajo.</span>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {vis.map((x) => (
+              <button key={x.p.id} onClick={() => { setSelId(x.p.id); setExpId(null); }} className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium" style={{ border: "1px solid " + (x.p.id === selId ? CON_ACCENT : "var(--steel-200)"), background: x.p.id === selId ? "#E6F7F7" : "#fff", color: "var(--text-900)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: x.done ? COLORS.green : x.rag.level === "rojo" ? COLORS.red : x.rag.level === "amarillo" ? COLORS.amber : COLORS.green }} />{x.p.name}<span style={{ color: "var(--text-400)" }}>· {x.avance}%</span>
+              </button>))}
+            {vis.length === 0 && <span className="text-xs" style={{ color: "var(--text-400)" }}>No hay proyectos con este filtro.</span>}
+          </div>
+        </div>
+      )}
+      {needsProject && !project && <Panel><p className="text-sm" style={{ color: "var(--text-600)" }}>Aún no hay proyectos. Crea una Orden de trabajo y aquí aparecerá lista para construir.</p></Panel>}
+      {needsProject && project && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-xl font-semibold" style={{ fontFamily: "var(--font-display)" }}>{project.name}</h2><RagDot level={r.rag.level} />
+          {r.done && <span className="risk-pill" style={{ background: "var(--green-soft)", color: COLORS.green }}>Terminado</span>}
+        </div>
+      )}
+      {tab === "proceso" && project && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <DKpi color="#16A34A" icon="📈" label="Avance físico" value={r.avance} fmt={(v) => Math.round(v) + "%"} sub={r.rag.lateCount + " fase(s) atrasada(s)"} />
+            <DKpi color="#0EA5A4" icon="🔧" label="Fase actual" value={r.cur ? r.cur.shortName : "—"} sub={r.cur ? r.cur.progress + "% de la fase" : ""} delay={60} />
+            <DKpi color={r.daysLeft !== null && r.daysLeft < 0 && !r.done ? "#EF4444" : "#2563EB"} icon="📅" label="Entrega" value={r.delivery ? fdate(r.delivery) : "—"} sub={r.done ? "entregado" : r.daysLeft === null ? "" : r.daysLeft < 0 ? "vencida hace " + -r.daysLeft + " días" : "faltan " + r.daysLeft + " días"} delay={120} />
+            <DKpi color={r.rag.incHigh ? "#EF4444" : "#F59E0B"} icon="⚠️" label="Incidencias abiertas" value={r.incOpen} sub={r.rag.incHigh + " de severidad alta"} delay={180} />
+          </div>
+          <CON_Info r={r} />
+          <Panel><PanelHeader title="Proceso del proyecto" /><CP_PhaseFlow phases={project.phases} expandedId={expId} setExpandedId={setExpId} onUpdatePhase={updatePhase} onToggleDeliverable={toggleDel} /></Panel>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Panel><PanelHeader title="Curva S — avance planificado vs. real" /><CP_SCurveChart phases={project.phases} /></Panel>
+            <Panel><PanelHeader title="Peso y avance logrado por fase" /><CP_BudgetChart phases={project.phases} /></Panel>
+          </div>
+        </div>
+      )}
+      {tab === "incidencias" && project && <CON_Incidents key={project.id} project={project} update={upd} />}
+      {tab === "bitacora" && project && <CON_Logbook key={project.id} project={project} update={upd} />}
+      {tab === "dashboard" && <CON_Dashboard rows={rows} />}
+      {tab === "reportes" && (
+        <Panel>
+          <PanelHeader title="Reportería de construcción" />
+          <p className="text-sm mb-4" style={{ color: "var(--text-600)" }}>Informes listos para imprimir o guardar como PDF, y Excel con proyectos, fases, incidencias y bitácora. Sin información de presupuesto.</p>
+          <div className="flex gap-3 flex-wrap">
+            <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => CON_openReport(rows)}><Printer size={14} />Informe de todos los proyectos activos</button>
+            <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => CON_exportExcel(rows)}><Download size={14} />Excel de todos</button>
+          </div>
+          <div className="mt-5"><label className="field-label">Informe de un proyecto</label>
+            <div className="flex gap-3 flex-wrap items-center">
+              <select className="field" style={{ width: "auto", minWidth: 220 }} value={selId || ""} onChange={(e) => setSelId(e.target.value)}>{rows.map((x) => <option key={x.p.id} value={x.p.id}>{x.p.name}</option>)}</select>
+              <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} disabled={!r} onClick={() => r && CON_openReport(rows, r)}><Printer size={14} />Informe PDF</button>
+              <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} disabled={!r} onClick={() => r && CON_exportExcel(rows, r)}><Download size={14} />Excel</button>
+            </div></div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 /* ===== MODULO: RESUMEN GENERAL (vista gerencial) ===== */
 function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali, gv, goTo }) {
   const now = new Date();
@@ -6634,6 +6923,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["gastos", "Control de gasto GAM", "#16A34A"],
     ["varios", "Gastos varios", "#EC4899"],
     ["alimentacion", "Alimentación", "#F59E0B"],
+    ["construccion", "Construcción", "#0EA5A4"],
     ["proformas", "Proformas", "#DB2777"],
   ];
   const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
@@ -6930,6 +7220,8 @@ function App() {
             {BANNERS[section] && <ModuleBanner title={BANNERS[section][0]} subtitle={BANNERS[section][1]} from={BANNERS[section][2]} to={BANNERS[section][3]} />}
             {section === "dashboard" ? (
               <DASH_Module orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state} gv={gvSync.state} proformas={proSync.state} />
+            ) : section === "construccion" ? (
+              <CON_Module projects={proyectosSync.state} orders={otEnriched} updateProject={updateProyecto} />
             ) : section === "proformas" ? (
               <PRO_Module data={proSync.state} setData={(u) => proSync.setState((prev) => (typeof u === "function" ? u(prev) : u))} />
             ) : section === "resumen" ? (
