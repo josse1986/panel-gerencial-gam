@@ -1268,6 +1268,7 @@ function CP_ReportingSection({ project, rag, milestones, projects }) {
 function CP_Module({ projects, updateProject, createProject, deleteProject, focusId, onNewProject }) {
   const [selectedId, setSelectedId] = useState(focusId || (projects[0] ? projects[0].id : null));
   const [pYear, setPYear] = useState("todos");
+  const [pMonth, setPMonth] = useState("todos");
   const [pEstado, setPEstado] = useState("todos");
   const [view, setView] = useState("detail");
   const [tab, setTab] = useState("resumen");
@@ -1334,13 +1335,17 @@ function CP_Module({ projects, updateProject, createProject, deleteProject, focu
           <option value="todos">Todos los años</option>
           {[...new Set(projects.map((p) => (CP_projectDates(p).start || "").slice(0, 4)).filter(Boolean))].sort().reverse().map((y) => <option key={y} value={y}>Iniciados en {y}</option>)}
         </select>
+        <select className="field" style={{ width: "auto" }} value={pMonth} onChange={(e) => setPMonth(e.target.value)}>
+          <option value="todos">Todos los meses</option>
+          {RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+        </select>
         <select className="field" style={{ width: "auto" }} value={pEstado} onChange={(e) => setPEstado(e.target.value)}>
           <option value="todos">Todos los estados</option>
           <option value="activos">En ejecución</option>
           <option value="terminados">Terminados</option>
         </select>
       </div>
-      <ModulePicker items={projects.filter((p) => p.id === selectedId || ((pYear === "todos" || (CP_projectDates(p).start || "").slice(0, 4) === pYear) && (pEstado === "todos" || (pEstado === "terminados") === (CP_projectState(p) === "culminado")))).map((p) => ({ id: p.id, name: p.name, sub: p.client, done: CP_isProjectComplete(p) || !!p.ctrlEnd }))} selectedId={selectedId}
+      <ModulePicker items={projects.filter((p) => p.id === selectedId || (PER_in(CP_projectDates(p).start, pYear, pMonth) && (pEstado === "todos" || (pEstado === "terminados") === (CP_projectState(p) === "culminado")))).map((p) => ({ id: p.id, name: p.name, sub: p.client, done: CP_isProjectComplete(p) || !!p.ctrlEnd }))} selectedId={selectedId}
         onSelect={(id) => { setSelectedId(id); setView("detail"); setTab("resumen"); setExpandedPhaseId(null); }}
         onNew={() => onNewProject && onNewProject()} onDelete={handleDelete} newLabel="Nuevo proyecto (desde orden de trabajo)" />
 
@@ -2665,6 +2670,7 @@ function MAT_Module({ projects, updateProject, createProject, deleteProject, vis
   const [selectedId, setSelectedId] = useState(projects[0] ? projects[0].id : null);
   const [tab, setTab] = useState("proyecto");
   const [view, setView] = useState("detail");
+  const [mY, setMY] = useState("todos"); const [mM, setMM] = useState("todos");
 
   useEffect(() => {
     if ((!selectedId || !projects.some((p) => p.id === selectedId)) && projects[0]) setSelectedId(projects[0].id);
@@ -2700,7 +2706,8 @@ function MAT_Module({ projects, updateProject, createProject, deleteProject, vis
       <SubTabs tabs={[["proyecto", "Proyecto"], ["visitas", "Visitas técnicas"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setView("detail"); }} />
       {tab === "proyecto" ? (
         <div className="space-y-6">
-          <ModulePicker items={projects.map((p) => ({ id: p.id, name: p.name, sub: p.client, done: MAT_cpInfo(p, cpProjects).done }))} selectedId={selectedId}
+          <PER_bar year={mY} month={mM} setYear={setMY} setMonth={setMM} years={PER_years(projects.map((p) => p.startDate))} note="Por fecha de inicio del proyecto" />
+          <ModulePicker items={projects.filter((p) => p.id === selectedId || PER_in(p.startDate, mY, mM)).map((p) => ({ id: p.id, name: p.name, sub: p.client, done: MAT_cpInfo(p, cpProjects).done }))} selectedId={selectedId}
             onSelect={(id) => { setSelectedId(id); setView("detail"); }} onNew={() => (onNewOT ? onNewOT() : setView("new"))} onDelete={handleDelete} newLabel="Nueva orden de trabajo" />
           {view === "new" ? (
             <MAT_NewProjectForm onCreate={handleCreate} onCancel={() => project && setView("detail")} cpProjects={cpProjects} />
@@ -3130,11 +3137,13 @@ function ACT_ReportingTab({ docs }) {
 }
 
 function ACT_Module({ docs: allDocs, setDocs, cpProjects, orders }) {
-  const docs = allDocs.filter((d) => d.docType !== "orden"); // las órdenes de trabajo ahora se gestionan en su propio módulo
+  const docsAll = allDocs.filter((d) => d.docType !== "orden"); // las órdenes de trabajo ahora se gestionan en su propio módulo
+  const [aY, setAY] = useState("todos"); const [aM, setAM] = useState("todos");
+  const docs = docsAll.filter((d) => PER_in(d.date, aY, aM));
   const [tab, setTab] = useState("documentos");
   const [selectedId, setSelectedId] = useState(null);
 
-  const selectedDoc = docs.find((d) => d.id === selectedId) || null;
+  const selectedDoc = docsAll.find((d) => d.id === selectedId) || null;
 
   const createDoc = () => {
     const docType = "acta";
@@ -3159,6 +3168,7 @@ function ACT_Module({ docs: allDocs, setDocs, cpProjects, orders }) {
   return (
     <div className="space-y-6">
       <SubTabs tabs={[["documentos", "Documentos"], ["reportes", "Reportería"]]} active={tab} onChange={(t) => { setTab(t); setSelectedId(null); }} />
+      {!selectedDoc && <PER_bar year={aY} month={aM} setYear={setAY} setMonth={setAM} years={PER_years(docsAll.map((d) => d.date))} note="Por fecha del acta" />}
       {tab === "reportes" ? (
         <ACT_ReportingTab docs={docs} />
       ) : selectedDoc ? (
@@ -4644,14 +4654,13 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
 
   const allRows = useMemo(() => GAS_orderRows(orders), [orders]);
   const clients = useMemo(() => [...new Set(allRows.map((r) => r.client))].sort(), [allRows]);
-  const years = useMemo(() => [...new Set([String(now.getFullYear()), ...expenses.map((e) => (e.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse(), [expenses]);
+  const years = useMemo(() => PER_years(orders.map((o) => o.issueDate)), [orders]);
   const orderLabel = (id) => { const o = orders.find((x) => x.id === id); return o ? "N.º " + o.number + " · " + o.name : "(orden eliminada)"; };
 
   const isRet = (e) => e.category === "materiales" || e.category === "transporte";
-  const rows = allRows.filter((r) => (fOrder === "todos" || r.id === fOrder) && (fClient === "todos" || r.client === fClient) && (fEstado === "todos" || r.status === fEstado));
+  const rows = allRows.filter((r) => PER_in(r.raw.issueDate, fYear, fMonth) && (fOrder === "todos" || r.id === fOrder) && (fClient === "todos" || r.client === fClient) && (fEstado === "todos" || r.status === fEstado));
   const rowIds = new Set(rows.map((r) => r.id));
   const exps = expenses.filter((e) => rowIds.has(e.otId) &&
-    (fYear === "todos" || (e.date || "").slice(0, 4) === fYear) && (fMonth === "todos" || Number((e.date || "").slice(5, 7)) === Number(fMonth)) &&
     (fCat === "todos" || e.category === fCat) &&
     (!q.trim() || ((e.concept || "") + " " + (e.supplier || "") + " " + (e.document || "") + " " + (e.worker || "")).toLowerCase().includes(q.trim().toLowerCase())));
   const hayFiltros = fYear !== "todos" || fMonth !== "todos" || fOrder !== "todos" || fClient !== "todos" || fCat !== "todos" || fEstado !== "todos" || q;
@@ -4696,8 +4705,8 @@ function GAS_Module({ orders, expenses, setExpenses, focusOrderId, onFocusHandle
   const Filters = (
     <Panel>
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        <div><label className="field-label">Año (fecha gasto)</label><select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
-        <div><label className="field-label">Mes</label><select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+        <div><label className="field-label">Año (emisión de la orden)</label><select className="field" value={fYear} onChange={(e) => setFYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+        <div><label className="field-label">Mes (emisión de la orden)</label><select className="field" value={fMonth} onChange={(e) => setFMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
         <div><label className="field-label">Orden de trabajo</label><select className="field" value={fOrder} onChange={(e) => setFOrder(e.target.value)}><option value="todos">Todas</option>{allRows.map((r) => <option key={r.id} value={r.id}>N.º {r.number} · {r.name}</option>)}</select></div>
         <div><label className="field-label">Cliente</label><select className="field" value={fClient} onChange={(e) => setFClient(e.target.value)}><option value="todos">Todos</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
         <div><label className="field-label">Categoría</label><select className="field" value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="todos">Todas</option>{GAS_CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
@@ -5309,7 +5318,8 @@ function ALI_Records({ people, entries, setEntries, orders }) {
         </form>
       </Panel>
       <Panel>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-4">
+          <PER_cells from={from} to={to} setFrom={setFrom} setTo={setTo} years={PER_years((entries || []).map((e) => e.date))} />
           <div><label className="field-label">Desde</label><input type="date" className="field" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
           <div><label className="field-label">Hasta</label><input type="date" className="field" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           <div><label className="field-label">Persona</label><select className="field" value={fp} onChange={(e) => setFp(e.target.value)}><option value="todos">Todas</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -5521,7 +5531,8 @@ function GV_Module({ expenses, setExpenses, orders }) {
 
   const Filters = (
     <Panel>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+        <PER_cells from={from} to={to} setFrom={setFrom} setTo={setTo} years={PER_years(expenses.map((e) => e.date))} />
         <div><label className="field-label">Desde</label><input type="date" className="field" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
         <div><label className="field-label">Hasta</label><input type="date" className="field" value={to} onChange={(e) => setTo(e.target.value)} /></div>
         <div><label className="field-label">Proyecto</label><select className="field" value={fProj} onChange={(e) => setFProj(e.target.value)}><option value="todos">Todos</option><option value="general">General / sin proyecto</option>{orders.map((o) => <option key={o.id} value={o.id}>N.º {o.number} · {o.name}</option>)}</select></div>
@@ -5788,7 +5799,7 @@ function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, g
     const mensual = monthsOf((m) => { const l = allRows.filter((r) => r.issue && Number(r.issue.slice(0, 4)) === chartYear && Number(r.issue.slice(5, 7)) === m); return { a: r2(l.reduce((s, r) => s + r.budget, 0)), b: r2(l.reduce((s, r) => s + r.actual, 0)) }; });
     const aliTot = ALI_stats((ali.entries || []).filter((e) => inP(e.date)), ali.people || []).total;
     const gvTot = r2((gv || []).filter((e) => inP(e.date)).reduce((a, e) => a + num(e.amount), 0));
-    const cpList = (proyectos || []);
+    const cpList = (proyectos || []).filter((p) => month === "todos" && year === "todos" ? true : inP(CP_projectDates(p).start));
     const crit = cpList.filter((p) => CP_projectState(p) === "critico").length;
     const ins = [];
     if (rows.length) {
@@ -5816,7 +5827,7 @@ function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, g
           <DKpi color="#F59E0B" icon="🍽️" label="Alimentación" value={aliTot} fmt={fm} sub="del periodo" />
           <DKpi color="#F43F5E" icon="🧾" label="Gastos varios" value={gvTot} fmt={fm} sub="representativos" delay={60} />
           <DKpi color="#0EA5A4" icon="🏗️" label="Proyectos en Control" value={cpList.length} sub={crit + " críticos"} delay={120} />
-          <DKpi color="#EC4899" icon="📝" label="Actas" value={(actDocs || []).filter((d) => d.docType !== "orden").length} sub="generadas desde órdenes" delay={180} />
+          <DKpi color="#EC4899" icon="📝" label="Actas" value={(actDocs || []).filter((d) => d.docType !== "orden" && inP(d.date) || (d.docType !== "orden" && month === "todos" && year === "todos")).length} sub="del periodo" delay={180} />
         </div>
         <DPanel title="Lectura gerencial" delay={160}><V_Insights items={ins} /></DPanel>
       </div>
@@ -5884,7 +5895,7 @@ function DASH_Module({ orders, expenses, proyectos, matProjects, actDocs, ali, g
   };
 
   const viewMateriales = () => {
-    const list = matProjects || [];
+    const list = (matProjects || []).filter((p) => month === "todos" && year === "todos" ? true : inP(p.startDate));
     const ps = list.map((p) => ({ p, s: MAT_planosStats(p), m: MAT_materialesStats(p), c: MAT_cpInfo(p, proyectos) }));
     const sum = (f) => ps.reduce((a, x) => a + f(x), 0);
     const pl = { t: sum((x) => x.s.total), e: sum((x) => x.s.entregados), a: sum((x) => x.s.aprobados) };
@@ -6286,15 +6297,16 @@ function PRO_Module({ data, setData }) {
   const [editing, setEditing] = useState(null);
   const [q, setQ] = useState(""); const [fEst, setFEst] = useState("todos");
   const [year, setYear] = useState(String(now.getFullYear()));
+  const [pMonth, setPMonth] = useState("todos");
   const [confirmId, setConfirmId] = useState(null);
   const [adv, setAdv] = useState(false);
   const [err, setErr] = useState("");
   const docs = data.docs || [], company = PRO_mergeCo(data.company);
   const setDocs = (u) => setData((prev) => ({ ...prev, docs: typeof u === "function" ? u(prev.docs || []) : u }));
-  const ready = useReady(tab + year);
+  const ready = useReady(tab + year + pMonth);
   const years = [...new Set([String(now.getFullYear()), ...docs.map((d) => (d.date || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
-  const inY = docs.filter((d) => year === "todos" || (d.date || "").slice(0, 4) === year);
-  const list = docs.filter((d) => (fEst === "todos" || d.status === fEst) && (!q || (d.client + " " + d.workTitle + " " + pro_code(d)).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => num(b.number) - num(a.number));
+  const inY = docs.filter((d) => PER_in(d.date, year, pMonth));
+  const list = docs.filter((d) => PER_in(d.date, year, pMonth) && (fEst === "todos" || d.status === fEst) && (!q || (d.client + " " + d.workTitle + " " + pro_code(d)).toLowerCase().includes(q.toLowerCase()))).sort((a, b) => num(b.number) - num(a.number));
 
   const save = () => {
     if (!editing.client.trim()) { setErr("Escribe el nombre del cliente."); return; }
@@ -6390,10 +6402,11 @@ function PRO_Module({ data, setData }) {
             <div className="space-y-5">
               <Panel><div className="flex items-end gap-3 flex-wrap">
                 <div><label className="field-label">Año</label><select className="field" value={year} onChange={(ev) => setYear(ev.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
-                <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => PRO_openReport(inY, year === "todos" ? "Todos los periodos" : "Año " + year)}><Printer size={14} />Informe gerencial</button>
+                <div><label className="field-label">Mes</label><select className="field" value={pMonth} onChange={(ev) => setPMonth(ev.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+                <button className="btn-primary flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => PRO_openReport(inY, PER_label(year, pMonth))}><Printer size={14} />Informe gerencial</button>
                 <button className="btn-ghost flex items-center gap-2" style={{ display: "inline-flex" }} onClick={() => PRO_exportExcel(inY)}><Download size={14} />Excel</button>
               </div></Panel>
-              <PRO_DashView key={year} list={inY} chartYear={year === "todos" ? now.getFullYear() : Number(year)} ready={ready} />
+              <PRO_DashView key={year + pMonth} list={inY} chartYear={year === "todos" ? now.getFullYear() : Number(year)} ready={ready} />
             </div>
           )}
           {tab === "lista" && (
@@ -6669,10 +6682,12 @@ function CON_Module({ projects, orders, updateProject }) {
   const [tab, setTab] = useState("proceso");
   const [filter, setFilter] = useState("activos");
   const [expId, setExpId] = useState(null);
-  const rows = useMemo(() => projects.map((p) => con_row(p, orders)), [projects, orders]);
+  const [cY, setCY] = useState("todos"); const [cM, setCM] = useState("todos");
+  const rowsAll = useMemo(() => projects.map((p) => con_row(p, orders)), [projects, orders]);
+  const rows = rowsAll.filter((x) => PER_in(CP_projectDates(x.p).start, cY, cM));
   const vis = rows.filter((r) => r.p.id === selId || filter === "todos" || (filter === "activos") === !r.done);
   useEffect(() => { if ((!selId || !projects.some((p) => p.id === selId)) && projects[0]) setSelId(projects[0].id); }, [projects, selId]);
-  const r = rows.find((x) => x.p.id === selId) || null;
+  const r = rowsAll.find((x) => x.p.id === selId) || null;
   const project = r ? r.p : null;
   const upd = (patch) => updateProject(project.id, patch);
   const updatePhase = (phaseId, patch) => upd({ phases: project.phases.map((ph) => (ph.id === phaseId ? { ...ph, ...patch } : ph)) });
@@ -6681,6 +6696,7 @@ function CON_Module({ projects, orders, updateProject }) {
   return (
     <div className="space-y-6">
       <ModuleBanner title="Construcción" subtitle="Proceso por fases, incidencias y bitácora de obra, alimentado desde la orden de trabajo" from="#0B3B3C" to="#0EA5A4" />
+      <PER_bar year={cY} month={cM} setYear={setCY} setMonth={setCM} years={PER_years(rowsAll.map((x) => CP_projectDates(x.p).start))} note="Por fecha de inicio del proyecto" />
       <div className="flex items-center gap-2 flex-wrap">
         <SubTabs tabs={[["proceso", "Proceso"], ["incidencias", "Incidencias"], ["bitacora", "Bitácora"], ["dashboard", "Dashboard"], ["reportes", "Reportes"]]} active={tab} onChange={setTab} />
       </div>
@@ -6744,6 +6760,35 @@ function CON_Module({ projects, orders, updateProject }) {
       )}
     </div>
   );
+}
+
+/* ===== FILTRO DE PERIODO COMPARTIDO ===== */
+const PER_in = (iso, y, m) => (y === "todos" && m === "todos") || (!!iso && (y === "todos" || String(iso).slice(0, 4) === String(y)) && (m === "todos" || Number(String(iso).slice(5, 7)) === Number(m)));
+const PER_years = (isos) => [...new Set([String(new Date().getFullYear()), ...isos.map((d) => String(d || "").slice(0, 4)).filter((x) => /^\d{4}$/.test(x))])].sort().reverse();
+const PER_label = (y, m) => (m === "todos" ? (y === "todos" ? "Todos los periodos" : "Año " + y) : RES_MESES_LARGO[Number(m) - 1] + " " + (y === "todos" ? new Date().getFullYear() : y));
+function PER_range(y, m) {
+  if (y === "todos" && m === "todos") return ["", ""];
+  const yy = y === "todos" ? new Date().getFullYear() : Number(y);
+  if (m === "todos") return [yy + "-01-01", yy + "-12-31"];
+  const mm = String(m).padStart(2, "0");
+  return [yy + "-" + mm + "-01", yy + "-" + mm + "-" + String(new Date(yy, Number(m), 0).getDate()).padStart(2, "0")];
+}
+function PER_cells({ from, to, setFrom, setTo, years }) {
+  const [y, setY] = useState("todos"); const [m, setM] = useState("todos");
+  useEffect(() => { if (!from && !to) { setY("todos"); setM("todos"); } }, [from, to]);
+  const apply = (ny, nm) => { if (nm !== "todos" && ny === "todos") ny = String(new Date().getFullYear()); setY(ny); setM(nm); const r = PER_range(ny, nm); setFrom(r[0]); setTo(r[1]); };
+  return (<Fragment>
+    <div><label className="field-label">Año</label><select className="field" value={y} onChange={(e) => apply(e.target.value, m)}><option value="todos">Todos</option>{years.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+    <div><label className="field-label">Mes</label><select className="field" value={m} onChange={(e) => apply(y, e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}</select></div>
+  </Fragment>);
+}
+function PER_bar({ year, month, setYear, setMonth, years, note }) {
+  return (<div className="flex items-end gap-3 flex-wrap">
+    <div><label className="field-label">Año</label><select className="field" value={year} onChange={(e) => setYear(e.target.value)}><option value="todos">Todos</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select></div>
+    <div><label className="field-label">Mes</label><select className="field" value={month} onChange={(e) => setMonth(e.target.value)}><option value="todos">Todos</option>{RES_MESES_LARGO.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></div>
+    {(year !== "todos" || month !== "todos") && <button className="text-xs underline pb-2" onClick={() => { setYear("todos"); setMonth("todos"); }}>Ver todos</button>}
+    {note && <span className="text-xs pb-2" style={{ color: "var(--text-400)" }}>{note}</span>}
+  </div>);
 }
 
 /* ===== MODULO: RESUMEN GENERAL (vista gerencial) ===== */
@@ -6902,7 +6947,7 @@ function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali,
       </Panel>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[["proyectos", "Control de proyectos", VIV.blue, (proyectos || []).length + " proyecto(s)"], ["materiales", "Planos y materiales", VIV.teal, (matProjects || []).length + " proyecto(s)"], ["actas", "Actas", VIV.violet, (actDocs || []).filter((d) => d.docType !== "orden").length + " acta(s)"], ["gastos", "Control de gasto GAM", VIV.orange, (expenses || []).length + " gasto(s)"], ["ordenes", "Órdenes de trabajo", VIV.navy, allRows.length + " orden(es)"], ["varios", "Gastos varios", VIV.pink, (gv || []).length + " gasto(s)"], ["alimentacion", "Alimentación", VIV.pink, (ali.entries || []).length + " registro(s)"]].map(([k, t, c, sub]) => (
+        {[["proyectos", "Control de proyectos", VIV.blue, (proyectos || []).filter((p) => ids.has(p.otId)).length + " proyecto(s) del periodo"], ["materiales", "Planos y materiales", VIV.teal, (matProjects || []).filter((p) => ids.has(p.otId)).length + " proyecto(s) del periodo"], ["actas", "Actas", VIV.violet, (actDocs || []).filter((d) => d.docType !== "orden" && ids.has(d.otId)).length + " acta(s) del periodo"], ["gastos", "Control de gasto GAM", VIV.orange, (expenses || []).length + " gasto(s)"], ["ordenes", "Órdenes de trabajo", VIV.navy, allRows.length + " orden(es)"], ["varios", "Gastos varios", VIV.pink, (gv || []).length + " gasto(s)"], ["alimentacion", "Alimentación", VIV.pink, (ali.entries || []).length + " registro(s)"]].map(([k, t, c, sub]) => (
           <button key={k} onClick={() => goTo(k)} className="text-left" style={{ background: "#fff", border: "1px solid var(--steel-200)", borderTop: "4px solid " + c, borderRadius: 12, padding: "12px 14px", cursor: "pointer" }}>
             <p className="text-sm font-semibold" style={{ color: "var(--text-900)", fontFamily: "var(--font-display)" }}>{t}</p>
             <p className="text-xs" style={{ color: "var(--text-400)" }}>{sub}</p>
