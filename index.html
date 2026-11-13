@@ -1660,11 +1660,24 @@ function CHAT_Module({ user, chat }) {
   const msgsAll = visible.filter((m) => m.to === ch.id);
   const msgs = query.trim() ? msgsAll.filter((m) => CHAT_norm(m.text + " " + (m.file ? m.file.name : "")).includes(CHAT_norm(query))) : msgsAll;
   const byId = {}; visible.forEach((m) => { byId[m.id] = m; });
-  const isNarrow = typeof window !== "undefined" && window.innerWidth < 760;
+  const isNarrow = typeof window !== "undefined" && window.innerWidth < 640;
+  const [vv, setVv] = useState({ h: typeof window !== "undefined" ? window.innerHeight : 800, t: 0, full: typeof window !== "undefined" ? window.innerHeight : 800 });
+  useEffect(() => {
+    const v = window.visualViewport;
+    const f = () => { setVv({ h: v ? v.height : window.innerHeight, t: v ? v.offsetTop : 0, full: window.innerHeight }); if (window.scrollY) window.scrollTo(0, 0); };
+    f();
+    if (v) { v.addEventListener("resize", f); v.addEventListener("scroll", f); }
+    window.addEventListener("resize", f); window.addEventListener("orientationchange", f);
+    return () => { if (v) { v.removeEventListener("resize", f); v.removeEventListener("scroll", f); } window.removeEventListener("resize", f); window.removeEventListener("orientationchange", f); };
+  }, []);
+  const tbEl = typeof document !== "undefined" ? document.getElementById("mobile-topbar") : null;
+  const tbH = tbEl ? tbEl.offsetHeight : 52;
+  const kb = isNarrow && vv.h < vv.full * 0.8;
+  const wrapStyle = isNarrow ? { position: "fixed", left: 0, right: 0, top: kb ? vv.t : vv.t + tbH, height: kb ? vv.h : vv.h - tbH, zIndex: 30 } : {};
 
   useEffect(() => { chat.touchRead(ch.id, true); }, [ch.id, msgsAll.length]);
   useEffect(() => { const iv = setInterval(() => chat.touchRead(ch.id, true), 60000); return () => clearInterval(iv); }, [ch.id, msgsAll.length]);
-  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [msgsAll.length, ch.id]);
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [msgsAll.length, ch.id, kb]);
   useEffect(() => { try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) {} }, []);
 
   const pick = (id) => { setActive(id); setShowList(false); setReplyTo(null); setEditing(null); setQuery(""); setSel(null); };
@@ -1705,8 +1718,8 @@ function CHAT_Module({ user, chat }) {
   const headSub = ch.kind === "dm" ? CHAT_ago(chat.seenOf(ch.other)) : ch.desc + " · " + ch.members.length + " miembros";
   let lastDay = "", lastFrom = "", lastMs = 0;
   return (
-    <div className="chat-wrap" style={{ display: "flex", background: "#fff", borderRadius: 0, overflow: "hidden" }}>
-      <style>{`.chat-wrap{ height:100vh; height:100dvh; } @media (max-width:639px){ .chat-wrap{ height:calc(100dvh - 52px); } }
+    <div className="chat-wrap" style={{ display: "flex", background: "#fff", borderRadius: 0, overflow: "hidden", ...wrapStyle }}>
+      <style>{`.chat-wrap{ height:100vh; height:100dvh; } .chat-wrap textarea{ font-size:16px !important; } @media (max-width:639px){ .chat-wrap{ overscroll-behavior:contain; } }
         .chat-msg:hover .chat-actions{ opacity:1; } .chat-actions{ opacity:0; transition:opacity .12s; }
         @media (hover:none){ .chat-actions{ opacity:1; } }`}</style>
       <div style={{ width: isNarrow ? "100%" : 250, flexShrink: 0, background: "#1B2E4F", color: "#fff", overflowY: "auto", display: !isNarrow || showList ? "block" : "none", padding: "14px 8px" }}>
@@ -1727,7 +1740,7 @@ function CHAT_Module({ user, chat }) {
             </div>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar…" className="field" style={{ maxWidth: 150 }} />
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-3" onClick={() => setSel(null)}>
+          <div className="flex-1 overflow-y-auto px-4 py-3" style={{ minHeight: 0, WebkitOverflowScrolling: "touch" }} onClick={() => setSel(null)}>
             {msgs.length === 0 && <p className="text-center text-sm mt-10" style={{ color: "var(--text-400)" }}>{query ? "Sin resultados." : "Aún no hay mensajes. ¡Escribe el primero!"}</p>}
             {msgs.map((m) => {
               const u = AUTH_userById(m.from) || AUTH_USERS[0];
@@ -1772,7 +1785,7 @@ function CHAT_Module({ user, chat }) {
             })}
             <div ref={endRef} />
           </div>
-          <div className="px-4 pb-3 pt-2" style={{ background: "#fff", borderTop: "1px solid var(--steel-200)", position: "relative" }}>
+          <div className="px-4 pt-2" style={{ background: "#fff", borderTop: "1px solid var(--steel-200)", position: "relative", paddingBottom: kb ? 8 : "max(12px, env(safe-area-inset-bottom))", flexShrink: 0 }}>
             {replyTo && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#EEF2F7", borderRadius: 8, padding: "5px 10px" }}><span className="flex-1 truncate">Respondiendo a <b>{(AUTH_userById(replyTo.from) || {}).name}</b>: {String(replyTo.text || (replyTo.file && replyTo.file.name) || "").slice(0, 80)}</span><button onClick={() => setReplyTo(null)}><X size={14} /></button></div>}
             {editing && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#FEF3C7", borderRadius: 8, padding: "5px 10px" }}><span className="flex-1">Editando mensaje</span><button onClick={() => { setEditing(null); setDraft(""); }}><X size={14} /></button></div>}
             {file && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#EEF2F7", borderRadius: 8, padding: "5px 10px" }}><FileIcon size={14} /><span className="flex-1 truncate">{file.name}</span><button onClick={() => setFile(null)}><X size={14} /></button></div>}
@@ -7791,7 +7804,7 @@ function App({ user, onLogout, onPasswordChanged }) {
       <MasterSidebar user={user} onLogout={onLogout} allowed={allowed} chatUnread={chat.unread.total} section={section} setSection={setSection} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} syncStatus={syncStatus} onRefreshAll={refreshAll} onOpenSettings={() => setShowSettings(true)} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="sm:hidden flex items-center gap-3 px-4 py-3 no-print" style={{ background: "var(--ink-900)", paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}>
+        <div id="mobile-topbar" className="sm:hidden flex items-center gap-3 px-4 py-3 no-print" style={{ background: "var(--ink-900)", paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}>
           <button onClick={() => setMobileNavOpen(true)} aria-label="Abrir menú" style={{ color: "#fff" }}><Menu size={20} /></button>
           <div style={{ background: "#fff", borderRadius: 7, padding: 3, display: "flex", flexShrink: 0 }}>
             <img src={getLogo()} alt="Logo" style={{ height: 20, width: 20, objectFit: "contain" }} />
