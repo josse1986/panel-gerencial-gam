@@ -1263,6 +1263,539 @@ function CP_ReportingSection({ project, rag, milestones, projects }) {
   );
 }
 
+/* ===================================================================================
+   MODULO: ACCESO (usuarios y contraseñas) + CHAT INTERNO + ADMINISTRACION
+   =================================================================================== */
+
+const AUTH_USERS = [
+  { id: "gg", name: "Gerencia General", tag: "gerencia", role: "full", color: "#2563EB", def: "gerencia2026" },
+  { id: "gp", name: "Gerencia de Proyectos", tag: "proyectos", role: "full", admin: true, color: "#0EA5A4", def: "proyectos2026" },
+  { id: "con", name: "Construcción", tag: "construccion", role: "obra", color: "#F59E0B", def: "construccion2026" },
+  { id: "ing", name: "Ingeniería", tag: "ingenieria", role: "obra", color: "#7C3AED", def: "ingenieria2026" },
+  { id: "asi", name: "Asistente Administrativa", tag: "asistente", role: "full", color: "#DB2777", def: "asistente2026" },
+];
+const AUTH_OBRA_KEYS = ["construccion", "materiales", "chat"];
+const AUTH_SESSION_KEY = "gam_auth_v1";
+const AUTH_CACHE_KEY = "gam_users_cache_v1";
+const AUTH_userById = (id) => AUTH_USERS.find((u) => u.id === id);
+const AUTH_GRUPO = () => (typeof window !== "undefined" && window.__GRUPO) || "";
+
+function AUTH_sha256(str) {
+  const utf = unescape(encodeURIComponent(str));
+  const bytes = []; for (let i = 0; i < utf.length; i++) bytes.push(utf.charCodeAt(i));
+  const primes = []; for (let n = 2; primes.length < 64; n++) { if (primes.every((p) => n % p)) primes.push(n); }
+  const fr = (x) => Math.floor((x - Math.floor(x)) * 4294967296);
+  const K = primes.map((p) => fr(Math.cbrt(p)));
+  const h = primes.slice(0, 8).map((p) => fr(Math.sqrt(p)));
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80); while (bytes.length % 64 !== 56) bytes.push(0);
+  for (let i = 7; i >= 0; i--) bytes.push(i > 3 ? 0 : (bitLen >>> (i * 8)) & 255);
+  const w = new Array(64);
+  for (let o = 0; o < bytes.length; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = (bytes[o + 4 * i] << 24) | (bytes[o + 4 * i + 1] << 16) | (bytes[o + 4 * i + 2] << 8) | bytes[o + 4 * i + 3];
+    for (let i = 16; i < 64; i++) {
+      const a = w[i - 15], c = w[i - 2];
+      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+      const s1 = ((c >>> 17) | (c << 15)) ^ ((c >>> 19) | (c << 13)) ^ (c >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (hh + S1 + ch + K[i] + w[i]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const mj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + mj) | 0;
+      hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+    h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+  }
+  return h.map((x) => (x >>> 0).toString(16).padStart(8, "0")).join("");
+}
+const AUTH_hash = (id, pass) => AUTH_sha256("gam|" + id + "|" + pass);
+
+async function AUTH_loadUsers() {
+  const arr = await apiGet("Usuarios");
+  const r = arr[0] || {};
+  const map = {};
+  (r.users || []).forEach((u) => { if (u && u.id && u.hash) map[u.id] = u; });
+  try { localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(map)); } catch (e) {}
+  return map;
+}
+function AUTH_cached() { try { return JSON.parse(localStorage.getItem(AUTH_CACHE_KEY) || "{}"); } catch (e) { return {}; } }
+const AUTH_checkPass = (id, pass, map) => { const u = AUTH_userById(id); if (!u) return false; const rec = map[id]; return rec ? rec.hash === AUTH_hash(id, pass) : pass === u.def; };
+const AUTH_curHash = (id, map) => (map[id] ? map[id].hash : "def");
+function AUTH_allowedKeys(user) {
+  if (!user) return [];
+  if (user.role === "obra") return AUTH_OBRA_KEYS;
+  const base = ["dashboard", "resumen", "ordenes", "proyectos", "materiales", "actas", "gastos", "varios", "alimentacion", "construccion", "proformas", "chat"];
+  return user.admin ? [...base, "admin"] : base;
+}
+
+function AuthGate() {
+  const [phase, setPhase] = useState("checking");
+  const [user, setUser] = useState(null);
+  const [map, setMap] = useState({});
+  const GRUPO = AUTH_GRUPO();
+  const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
+
+  const canEnter = (u) => {
+    if (!u) return false;
+    if (GRUPO === "obra" && u.role !== "obra") return false;
+    if (ONLY && !AUTH_allowedKeys(u).includes(ONLY)) return false;
+    return true;
+  };
+  useEffect(() => {
+    (async () => {
+      let s = null; try { s = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null"); } catch (e) {}
+      let m = AUTH_cached(); let online = true;
+      try { m = await AUTH_loadUsers(); } catch (e) { if (e.code !== "not_configured") online = false; }
+      setMap(m);
+      const u = s && AUTH_userById(s.id);
+      if (u && canEnter(u) && (s.h === AUTH_curHash(u.id, m) || (!online && s.h))) { setUser(u); setPhase("in"); }
+      else setPhase("login");
+    })();
+    // eslint-disable-next-line
+  }, []);
+  const doLogin = async (id, pass) => {
+    let m = map;
+    try { m = await AUTH_loadUsers(); setMap(m); } catch (e) { m = AUTH_cached(); }
+    const u = AUTH_userById(id);
+    if (!u || !AUTH_checkPass(id, pass, m)) return "Usuario o contraseña incorrectos.";
+    if (!canEnter(u)) return GRUPO === "obra" ? "Este usuario debe entrar por el panel gerencial." : "No tienes acceso a este módulo.";
+    try { localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ id, h: AUTH_curHash(id, m), t: Date.now() })); } catch (e) {}
+    setUser(u); setPhase("in"); return "";
+  };
+  const logout = () => { try { localStorage.removeItem(AUTH_SESSION_KEY); } catch (e) {} setUser(null); setPhase("login"); };
+  const refreshSession = (id, newHash) => { try { localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ id, h: newHash, t: Date.now() })); } catch (e) {} };
+
+  if (phase === "checking") return <div className="w-full h-full flex items-center justify-center" style={{ color: "#8797A6" }}>Cargando…</div>;
+  if (phase === "login") return <LoginScreen onLogin={doLogin} users={GRUPO === "obra" ? AUTH_USERS.filter((u) => u.role === "obra") : AUTH_USERS.filter((u) => canEnter(u))} />;
+  return <App user={user} onLogout={logout} onPasswordChanged={refreshSession} />;
+}
+
+function LoginScreen({ onLogin, users }) {
+  const [id, setId] = useState("");
+  const [pass, setPass] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!id) { setErr("Elige tu usuario."); return; }
+    setBusy(true); setErr("");
+    const r = await onLogin(id, pass);
+    if (r) { setErr(r); setBusy(false); }
+  };
+  const inp = { width: "100%", border: "1px solid #D7DEE5", borderRadius: 10, padding: "11px 12px", fontSize: 14, background: "#fff", color: "#16202E", outline: "none" };
+  return (
+    <div style={{ minHeight: "100vh", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "radial-gradient(1200px 600px at 20% -10%, #1B2E4F 0%, #12203A 55%, #0B1530 100%)", fontFamily: "'Inter',sans-serif" }}>
+      <form onSubmit={submit} style={{ width: "100%", maxWidth: 380, background: "#fff", borderRadius: 18, padding: 26, boxShadow: "0 30px 60px -20px rgba(0,0,0,.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <img src={getLogo()} alt="Logo" style={{ height: 44, width: 44, objectFit: "contain" }} />
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 16, color: "#12203A", lineHeight: 1.15 }}>Soluciones Industriales GAM</div>
+            <div style={{ fontSize: 12, color: "#F59E0B", fontWeight: 600 }}>{AUTH_GRUPO() === "obra" ? "Obra e Ingeniería" : "Panel gerencial"}</div>
+          </div>
+        </div>
+        <label style={{ fontSize: 11, color: "#8797A6", display: "block", marginBottom: 4 }}>Usuario</label>
+        <select value={id} onChange={(e) => setId(e.target.value)} style={{ ...inp, marginBottom: 12 }}>
+          <option value="">Selecciona…</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <label style={{ fontSize: 11, color: "#8797A6", display: "block", marginBottom: 4 }}>Contraseña</label>
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <input type={show ? "text" : "password"} value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" style={inp} />
+          <button type="button" onClick={() => setShow(!show)} style={{ position: "absolute", right: 10, top: 11, fontSize: 12, color: "#52606D" }}>{show ? "Ocultar" : "Ver"}</button>
+        </div>
+        {err && <p style={{ fontSize: 12.5, color: "#DC2626", marginBottom: 10 }}>{err}</p>}
+        <button type="submit" disabled={busy} style={{ width: "100%", background: "linear-gradient(120deg,#12203A,#2563EB)", color: "#fff", borderRadius: 10, padding: "12px 0", fontWeight: 600, fontSize: 14, opacity: busy ? .7 : 1 }}>{busy ? "Verificando…" : "Entrar"}</button>
+        <p style={{ fontSize: 11, color: "#8797A6", marginTop: 12, textAlign: "center" }}>Si olvidaste tu contraseña, pídesela a Gerencia de Proyectos.</p>
+      </form>
+    </div>
+  );
+}
+
+/* ----------------------------- Administracion de contrasenas ----------------------------- */
+
+function ADM_Module({ user, onPasswordChanged }) {
+  const [map, setMap] = useState(null);
+  const [vals, setVals] = useState({});
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => { try { setMap(await AUTH_loadUsers()); } catch (e) { setMsg("No se pudo leer la hoja. Revisa la conexión."); setMap(AUTH_cached()); } };
+  useEffect(() => { load(); }, []);
+  if (!user || !user.admin) return <Panel><p className="text-sm">Solo Gerencia de Proyectos puede administrar contraseñas.</p></Panel>;
+  const persist = async (next) => {
+    const users = Object.values(next);
+    await apiSet("Usuarios", [{ id: "usuarios", name: "Usuarios", client: "", type: "", users }]);
+    try { localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(next)); } catch (e) {}
+    setMap(next);
+  };
+  const save = async (u) => {
+    const p = (vals[u.id] || "").trim();
+    if (p.length < 6) { setMsg("La contraseña de " + u.name + " debe tener al menos 6 caracteres."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const fresh = await AUTH_loadUsers();
+      const h = AUTH_hash(u.id, p);
+      const next = { ...fresh, [u.id]: { id: u.id, hash: h, changed: new Date().toISOString() } };
+      await persist(next);
+      if (u.id === user.id) onPasswordChanged(u.id, h);
+      setVals((v) => ({ ...v, [u.id]: "" }));
+      setMsg("Contraseña de " + u.name + " actualizada. La próxima vez que esa persona abra la app deberá entrar con la nueva.");
+    } catch (e) { setMsg("No se pudo guardar. Inténtalo otra vez."); }
+    setBusy(false);
+  };
+  const reset = async (u) => {
+    if (!window.confirm("¿Volver la contraseña de " + u.name + " a la inicial (" + u.def + ")?")) return;
+    setBusy(true); setMsg("");
+    try {
+      const fresh = await AUTH_loadUsers(); const next = { ...fresh }; delete next[u.id];
+      await persist(next);
+      if (u.id === user.id) onPasswordChanged(u.id, "def");
+      setMsg("Contraseña de " + u.name + " restablecida a la inicial.");
+    } catch (e) { setMsg("No se pudo guardar."); }
+    setBusy(false);
+  };
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <ModuleBanner title="Administración de accesos" subtitle="Solo Gerencia de Proyectos · define o cambia la contraseña de cada usuario" from="#1E293B" to="#475569" />
+      <Panel>
+        <PanelHeader title="Usuarios y contraseñas" />
+        {map === null ? <p className="text-sm" style={{ color: "var(--text-400)" }}>Cargando…</p> : (
+          <div className="space-y-3">
+            {AUTH_USERS.map((u) => {
+              const rec = map[u.id];
+              return (
+                <div key={u.id} className="flex items-center gap-3 flex-wrap" style={{ border: "1px solid var(--steel-200)", borderRadius: 12, padding: 12 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: u.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{u.name[0]}</div>
+                  <div style={{ minWidth: 170, flex: "1 1 170px" }}>
+                    <p className="text-sm font-semibold" style={{ color: "var(--text-900)" }}>{u.name}</p>
+                    <p className="text-xs" style={{ color: "var(--text-400)" }}>{u.role === "obra" ? "Solo Construcción y Planos y materiales" : "Todos los módulos"}{u.admin ? " · administra accesos" : ""}</p>
+                    <p className="text-xs" style={{ color: rec ? COLORS.green : COLORS.amber }}>{rec ? "Personalizada" + (rec.changed ? " · " + fdate(String(rec.changed).slice(0, 10)) : "") : "Usa la contraseña inicial"}</p>
+                  </div>
+                  <input type="text" className="field" style={{ maxWidth: 200 }} placeholder="Nueva contraseña" value={vals[u.id] || ""} onChange={(e) => setVals((v) => ({ ...v, [u.id]: e.target.value }))} autoComplete="off" />
+                  <button disabled={busy} onClick={() => save(u)} className="btn-primary text-xs">Guardar</button>
+                  <button disabled={busy} onClick={() => reset(u)} className="btn-ghost text-xs">Restablecer</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {msg && <p className="text-sm mt-3" style={{ color: "var(--text-600)" }}>{msg}</p>}
+        <p className="text-xs mt-4" style={{ color: "var(--text-400)" }}>Las contraseñas se guardan cifradas (no se pueden leer, solo reemplazar). Mínimo 6 caracteres.</p>
+      </Panel>
+    </div>
+  );
+}
+
+/* ----------------------------- Chat interno ----------------------------- */
+
+const CHAT_GROUPS = [
+  { id: "general", name: "general", desc: "Todo el equipo", members: ["gg", "gp", "con", "ing", "asi"] },
+  { id: "gerencia", name: "gerencia", desc: "Gerencias y administración", members: ["gg", "gp", "asi"] },
+  { id: "obra", name: "obra-ingenieria", desc: "Obra, ingeniería y gerencias", members: ["gg", "gp", "con", "ing"] },
+];
+const CHAT_dm = (a, b) => "dm:" + [a, b].sort().join(":");
+const CHAT_EMOJIS = ["👍", "✅", "❤️", "😂", "🙏", "👀"];
+const CHAT_norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const CHAT_mentions = (text, u) => { const t = CHAT_norm(text); return t.includes("@" + u.tag) || t.includes("@todos"); };
+function CHAT_channelsFor(user) {
+  const groups = CHAT_GROUPS.filter((c) => c.members.includes(user.id)).map((c) => ({ ...c, kind: "group" }));
+  const dms = AUTH_USERS.filter((u) => u.id !== user.id).map((u) => ({ id: CHAT_dm(user.id, u.id), name: u.name, kind: "dm", other: u.id, members: [user.id, u.id] }));
+  return { groups, dms };
+}
+function CHAT_merge(a, b) {
+  const m = new Map();
+  [...(a || []), ...(b || [])].forEach((it) => { if (!it || !it.id) return; const p = m.get(it.id); if (!p || (it.u || 0) >= (p.u || 0)) m.set(it.id, it); });
+  return [...m.values()];
+}
+const CHAT_row = (it) => ({ ...it, client: "", name: it.type === "msg" ? String(it.text || it.file?.name || "").slice(0, 60) : it.type, type: it.type });
+function CHAT_beep() { try { const C = window.AudioContext || window.webkitAudioContext; const c = new C(); const o = c.createOscillator(); const g = c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value = 880; g.gain.setValueAtTime(0.12, c.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.25); o.start(); o.stop(c.currentTime + 0.26); } catch (e) {} }
+
+function useChat(user, open) {
+  const [all, setAll] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");
+  const mine = useRef([]);
+  const saving = useRef(Promise.resolve());
+  const timer = useRef(null);
+  const firstLoad = useRef(true);
+  const notified = useRef(Date.now());
+  const myId = user.id;
+
+  const fetchAll = useCallback(async () => {
+    if (typeof window !== "undefined" && window.__MODULO) { setLoaded(true); return; }
+    try {
+      const res = await Promise.all(AUTH_USERS.map((u) => apiGet("Chat_" + u.id).then((a) => [u.id, a]).catch((e) => { if (e.code === "not_configured") throw e; return [u.id, null]; })));
+      const next = {};
+      res.forEach(([id, a]) => { if (a) next[id] = id === myId ? CHAT_merge(a, mine.current) : a; });
+      if (next[myId]) mine.current = next[myId];
+      setAll((prev) => ({ ...prev, ...next }));
+      setErr(""); setLoaded(true);
+    } catch (e) { setErr("Sin conexión con el chat"); setLoaded(true); }
+  }, [myId]);
+
+  const flush = useCallback(() => {
+    saving.current = saving.current.then(async () => {
+      try {
+        let remote = []; try { remote = await apiGet("Chat_" + myId); } catch (e) {}
+        const merged = CHAT_merge(remote, mine.current);
+        mine.current = merged;
+        await apiSet("Chat_" + myId, merged.map(CHAT_row));
+        setErr("");
+      } catch (e) { setErr("No se pudo enviar. Se reintentará."); setTimeout(flush, 5000); }
+    });
+  }, [myId]);
+  const commit = useCallback((fn) => {
+    mine.current = fn(mine.current).map((it) => it);
+    setAll((p) => ({ ...p, [myId]: mine.current }));
+    clearTimeout(timer.current); timer.current = setTimeout(flush, 350);
+  }, [myId, flush]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    const iv = setInterval(fetchAll, open ? 8000 : 45000);
+    const vis = () => { if (document.visibilityState === "visible") fetchAll(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", vis); };
+  }, [fetchAll, open]);
+
+  const msgs = useMemo(() => {
+    const out = [];
+    Object.entries(all).forEach(([uid2, items]) => (items || []).forEach((it) => { if (it && it.type === "msg") out.push({ ...it, from: it.from || uid2 }); }));
+    return out.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  }, [all]);
+  const reactions = useMemo(() => {
+    const map = {};
+    Object.entries(all).forEach(([uid2, items]) => (items || []).forEach((it) => { if (it && it.type === "react" && it.on) { map[it.target] = map[it.target] || {}; (map[it.target][it.emoji] = map[it.target][it.emoji] || []).push(uid2); } }));
+    return map;
+  }, [all]);
+  const reads = ((all[myId] || []).find((i) => i.id === "read") || {}).reads || {};
+  const seenOf = (uid2) => { const r = (all[uid2] || []).find((i) => i.id === "read"); return r ? r.seen || 0 : 0; };
+
+  const mineChannels = useMemo(() => { const c = CHAT_channelsFor(user); return [...c.groups, ...c.dms]; }, [user]);
+  const visible = useMemo(() => { const ids = new Set(mineChannels.map((c) => c.id)); return msgs.filter((m) => ids.has(m.to) && !m.deleted); }, [msgs, mineChannels]);
+  const unread = useMemo(() => {
+    const r = {}; let total = 0, ment = 0;
+    visible.forEach((m) => { if (m.from !== myId && (m.ts_ms || 0) > (reads[m.to] || 0)) { r[m.to] = (r[m.to] || 0) + 1; total++; if (CHAT_mentions(m.text, user)) ment++; } });
+    return { byChannel: r, total, mentions: ment };
+  }, [visible, reads, myId, user]);
+
+  // avisos de mensajes nuevos
+  useEffect(() => {
+    if (!loaded) return;
+    if (firstLoad.current) { firstLoad.current = false; notified.current = Date.now(); return; }
+    const fresh = visible.filter((m) => m.from !== myId && (m.ts_ms || 0) > notified.current);
+    if (!fresh.length) return;
+    notified.current = Math.max(...fresh.map((m) => m.ts_ms || 0));
+    if (document.hidden || !open) {
+      CHAT_beep();
+      try { if (window.Notification && Notification.permission === "granted") { const m = fresh[fresh.length - 1]; new Notification((AUTH_userById(m.from) || {}).name || "Chat GAM", { body: m.text || "Archivo adjunto" }); } } catch (e) {}
+    }
+  }, [visible, loaded]);
+  useEffect(() => { try { document.title = (unread.total ? "(" + unread.total + ") " : "") + document.title.replace(/^\(\d+\) /, ""); } catch (e) {} }, [unread.total]);
+
+  const send = ({ to, text, file, replyTo }) => {
+    const now = Date.now();
+    const it = { id: "m" + now.toString(36) + Math.random().toString(36).slice(2, 6), type: "msg", from: myId, to, text: text || "", ts: new Date(now).toISOString(), ts_ms: now, u: now };
+    if (file) it.file = file; if (replyTo) it.replyTo = replyTo;
+    commit((a) => [...a, it]);
+  };
+  const edit = (id, text) => commit((a) => a.map((i) => (i.id === id ? { ...i, text, edited: true, u: Date.now() } : i)));
+  const remove = (id) => commit((a) => a.map((i) => (i.id === id ? { ...i, deleted: true, text: "", file: null, u: Date.now() } : i)));
+  const react = (target, emoji) => {
+    const rid = "r_" + target + "_" + emoji;
+    const cur = (mine.current.find((i) => i.id === rid) || {}).on;
+    commit((a) => CHAT_merge(a, [{ id: rid, type: "react", target, emoji, on: !cur, u: Date.now() }]));
+  };
+  const touchRead = (channel, extra) => {
+    const ts = Math.max(0, ...visible.filter((m) => m.to === channel).map((m) => m.ts_ms || 0));
+    const curR = (mine.current.find((i) => i.id === "read") || {});
+    const nextReads = { ...(curR.reads || {}) };
+    let changed = false;
+    if (channel && ts > (nextReads[channel] || 0)) { nextReads[channel] = ts; changed = true; }
+    const stale = Date.now() - (curR.seen || 0) > 60000;
+    if (changed || (extra && stale)) commit((a) => CHAT_merge(a, [{ id: "read", type: "read", reads: nextReads, seen: Date.now(), u: Date.now() }]));
+  };
+  return { loaded, err, visible, reactions, unread, mineChannels, send, edit, remove, react, touchRead, seenOf, reload: fetchAll };
+}
+
+function CHAT_avatar(u, size = 34) {
+  return <div style={{ width: size, height: size, borderRadius: 10, background: u.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.42, flexShrink: 0 }}>{u.name[0]}</div>;
+}
+function CHAT_text(text, me) {
+  const parts = String(text || "").split(/(@[A-Za-zÁÉÍÓÚáéíóúñÑ]+|https?:\/\/[^\s]+)/g);
+  return parts.map((p, i) => {
+    if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer" style={{ color: "#2563EB", textDecoration: "underline", wordBreak: "break-all" }}>{p}</a>;
+    if (/^@/.test(p)) { const n = CHAT_norm(p.slice(1)); const hit = n === "todos" || AUTH_USERS.some((u) => u.tag === n); if (hit) return <span key={i} style={{ background: "#DBEAFE", color: "#1D4ED8", borderRadius: 5, padding: "0 4px", fontWeight: 600 }}>{p}</span>; }
+    return <Fragment key={i}>{p}</Fragment>;
+  });
+}
+const CHAT_time = (ms) => new Date(ms).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
+const CHAT_dayLabel = (ms) => { const d = new Date(ms); const t = new Date(); const y = new Date(Date.now() - 86400000); const same = (a, b) => a.toDateString() === b.toDateString(); return same(d, t) ? "Hoy" : same(d, y) ? "Ayer" : new Intl.DateTimeFormat("es-EC", { weekday: "long", day: "2-digit", month: "long" }).format(d); };
+const CHAT_ago = (ms) => { if (!ms) return "sin actividad"; const m = Math.round((Date.now() - ms) / 60000); return m < 2 ? "en línea" : m < 60 ? "visto hace " + m + " min" : m < 1440 ? "visto hace " + Math.round(m / 60) + " h" : "visto " + fdate(new Date(ms).toISOString().slice(0, 10)); };
+
+function CHAT_Module({ user, chat }) {
+  const { mineChannels, visible, unread, reactions } = chat;
+  const groups = mineChannels.filter((c) => c.kind === "group");
+  const dms = mineChannels.filter((c) => c.kind === "dm");
+  const [active, setActive] = useState("general");
+  const [showList, setShowList] = useState(true);
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [query, setQuery] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [note, setNote] = useState("");
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const endRef = useRef(null);
+  const taRef = useRef(null);
+  const ch = mineChannels.find((c) => c.id === active) || groups[0];
+  const msgsAll = visible.filter((m) => m.to === ch.id);
+  const msgs = query.trim() ? msgsAll.filter((m) => CHAT_norm(m.text + " " + (m.file ? m.file.name : "")).includes(CHAT_norm(query))) : msgsAll;
+  const byId = {}; visible.forEach((m) => { byId[m.id] = m; });
+  const isNarrow = typeof window !== "undefined" && window.innerWidth < 760;
+
+  useEffect(() => { chat.touchRead(ch.id, true); }, [ch.id, msgsAll.length]);
+  useEffect(() => { const iv = setInterval(() => chat.touchRead(ch.id, true), 60000); return () => clearInterval(iv); }, [ch.id, msgsAll.length]);
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [msgsAll.length, ch.id]);
+  useEffect(() => { try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) {} }, []);
+
+  const pick = (id) => { setActive(id); setShowList(false); setReplyTo(null); setEditing(null); setQuery(""); setSel(null); };
+  const submit = () => {
+    const text = draft.trim();
+    if (editing) { if (text) chat.edit(editing, text); setEditing(null); setDraft(""); return; }
+    if (!text && !file) return;
+    chat.send({ to: ch.id, text, file, replyTo: replyTo ? replyTo.id : undefined });
+    setDraft(""); setFile(null); setReplyTo(null); setMentionOpen(false);
+    setTimeout(() => taRef.current && taRef.current.focus(), 0);
+  };
+  const onFile = async (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) { setNote("El archivo supera 12 MB."); return; }
+    setUploading(true); setNote("");
+    try { const r = await apiUploadFile(f); setFile({ name: f.name, url: r.url, mime: f.type || "", fileId: r.fileId || "" }); }
+    catch (er) { setNote("No se pudo subir el archivo."); }
+    setUploading(false);
+  };
+  const onChange = (e) => { const v = e.target.value; setDraft(v); setMentionOpen(/(^|\s)@[A-Za-zñ]*$/.test(v)); };
+  const insertMention = (tag) => { setDraft((d) => d.replace(/@[A-Za-zñ]*$/, "@" + tag + " ")); setMentionOpen(false); if (taRef.current) taRef.current.focus(); };
+  const startEdit = (m) => { setEditing(m.id); setDraft(m.text); setReplyTo(null); setSel(null); if (taRef.current) taRef.current.focus(); };
+
+  const chRow = (c) => {
+    const n = unread.byChannel[c.id] || 0;
+    const o = c.kind === "dm" ? AUTH_userById(c.other) : null;
+    const online = o && Date.now() - chat.seenOf(o.id) < 150000;
+    return (
+      <button key={c.id} onClick={() => pick(c.id)} className="w-full flex items-center gap-2 px-3 py-2 rounded text-left" style={{ background: active === c.id ? "rgba(255,255,255,.14)" : "transparent", color: n || active === c.id ? "#fff" : "rgba(255,255,255,.7)", fontWeight: n ? 700 : 500, fontSize: 13.5 }}>
+        {o ? <span style={{ position: "relative", display: "inline-flex" }}>{CHAT_avatar(o, 22)}<span style={{ position: "absolute", right: -2, bottom: -2, width: 9, height: 9, borderRadius: 99, background: online ? "#22C55E" : "#64748B", border: "2px solid #1B2E4F" }} /></span> : <span style={{ opacity: .7, width: 22, textAlign: "center" }}>#</span>}
+        <span className="flex-1 truncate">{c.name}</span>
+        {n > 0 && <span style={{ background: "#EF4444", color: "#fff", borderRadius: 99, fontSize: 11, padding: "1px 7px", fontWeight: 700 }}>{n}</span>}
+      </button>
+    );
+  };
+
+  const headSub = ch.kind === "dm" ? CHAT_ago(chat.seenOf(ch.other)) : ch.desc + " · " + ch.members.length + " miembros";
+  let lastDay = "", lastFrom = "", lastMs = 0;
+  return (
+    <div className="chat-wrap" style={{ display: "flex", background: "#fff", borderRadius: 0, overflow: "hidden" }}>
+      <style>{`.chat-wrap{ height:100vh; height:100dvh; } @media (max-width:639px){ .chat-wrap{ height:calc(100dvh - 52px); } }
+        .chat-msg:hover .chat-actions{ opacity:1; } .chat-actions{ opacity:0; transition:opacity .12s; }
+        @media (hover:none){ .chat-actions{ opacity:1; } }`}</style>
+      <div style={{ width: isNarrow ? "100%" : 250, flexShrink: 0, background: "#1B2E4F", color: "#fff", overflowY: "auto", display: !isNarrow || showList ? "block" : "none", padding: "14px 8px" }}>
+        <div className="px-3 mb-3"><div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16 }}>Chat interno</div><div style={{ fontSize: 11.5, color: "rgba(255,255,255,.55)" }}>Sesión: {user.name}</div></div>
+        <div className="px-3 mb-1" style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "rgba(255,255,255,.45)" }}>Canales</div>
+        {groups.map(chRow)}
+        <div className="px-3 mt-4 mb-1" style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "rgba(255,255,255,.45)" }}>Mensajes directos</div>
+        {dms.map(chRow)}
+        {chat.err && <p className="px-3 mt-4" style={{ fontSize: 11.5, color: "#FBBF24" }}>{chat.err}</p>}
+      </div>
+      {(!isNarrow || !showList) && (
+        <div className="flex-1 flex flex-col min-w-0" style={{ background: "#F8FAFC" }}>
+          <div className="flex items-center gap-3 px-4 py-3" style={{ background: "#fff", borderBottom: "1px solid var(--steel-200)" }}>
+            {isNarrow && <button onClick={() => setShowList(true)} style={{ fontSize: 20, color: "var(--text-600)" }}>‹</button>}
+            <div className="min-w-0 flex-1">
+              <div className="truncate" style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "var(--text-900)" }}>{ch.kind === "dm" ? ch.name : "# " + ch.name}</div>
+              <div className="truncate" style={{ fontSize: 12, color: "var(--text-400)" }}>{headSub}</div>
+            </div>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar…" className="field" style={{ maxWidth: 150 }} />
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3" onClick={() => setSel(null)}>
+            {msgs.length === 0 && <p className="text-center text-sm mt-10" style={{ color: "var(--text-400)" }}>{query ? "Sin resultados." : "Aún no hay mensajes. ¡Escribe el primero!"}</p>}
+            {msgs.map((m) => {
+              const u = AUTH_userById(m.from) || AUTH_USERS[0];
+              const day = CHAT_dayLabel(m.ts_ms); const newDay = day !== lastDay; lastDay = day;
+              const compact = !newDay && lastFrom === m.from && m.ts_ms - lastMs < 300000; lastFrom = m.from; lastMs = m.ts_ms;
+              const mine = m.from === user.id; const rx = reactions[m.id] || {}; const q = m.replyTo && byId[m.replyTo];
+              const mention = !mine && CHAT_mentions(m.text, user);
+              return (
+                <Fragment key={m.id}>
+                  {newDay && <div className="flex items-center gap-3 my-3"><div className="flex-1" style={{ height: 1, background: "var(--steel-200)" }} /><span style={{ fontSize: 11.5, color: "var(--text-400)", textTransform: "capitalize" }}>{day}</span><div className="flex-1" style={{ height: 1, background: "var(--steel-200)" }} /></div>}
+                  <div className="chat-msg" onClick={(e) => { e.stopPropagation(); setSel(sel === m.id ? null : m.id); }} style={{ display: "flex", gap: 10, padding: compact ? "1px 8px" : "8px 8px 1px", borderRadius: 8, background: mention ? "#FEF9C3" : sel === m.id ? "#EEF2F7" : "transparent", position: "relative" }}>
+                    <div style={{ width: 34, flexShrink: 0 }}>{!compact && CHAT_avatar(u)}</div>
+                    <div className="min-w-0 flex-1">
+                      {!compact && <div><span style={{ fontWeight: 700, fontSize: 13.5, color: "var(--text-900)" }}>{u.name}</span> <span style={{ fontSize: 11, color: "var(--text-400)" }}>{CHAT_time(m.ts_ms)}{m.edited ? " · editado" : ""}</span></div>}
+                      {q && <div style={{ borderLeft: "3px solid " + (AUTH_userById(q.from) || u).color, background: "#fff", padding: "3px 8px", borderRadius: 4, fontSize: 12, color: "var(--text-600)", margin: "2px 0" }}><b>{(AUTH_userById(q.from) || {}).name}</b>: {String(q.text || (q.file && q.file.name) || "").slice(0, 120)}</div>}
+                      {m.text && <div style={{ fontSize: 14, color: "var(--text-900)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{CHAT_text(m.text, user)}</div>}
+                      {m.file && (
+                        <a href={m.file.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ display: "inline-block", marginTop: 4, maxWidth: 320 }}>
+                          {m.file.mime && m.file.mime.startsWith("image/") && m.file.fileId && <img src={"https://drive.google.com/thumbnail?id=" + m.file.fileId + "&sz=w500"} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ maxWidth: 300, maxHeight: 220, borderRadius: 8, display: "block", marginBottom: 4, border: "1px solid var(--steel-200)" }} />}
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid var(--steel-200)", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, color: "#1D4ED8" }}><FileIcon size={14} />{m.file.name}</span>
+                        </a>
+                      )}
+                      {Object.keys(rx).length > 0 && (
+                        <div className="flex gap-1 flex-wrap mt-1">
+                          {Object.entries(rx).map(([em, who]) => (
+                            <button key={em} onClick={(e) => { e.stopPropagation(); chat.react(m.id, em); }} title={who.map((w) => (AUTH_userById(w) || {}).name).join(", ")} style={{ fontSize: 12, borderRadius: 99, padding: "1px 8px", border: "1px solid " + (who.includes(user.id) ? "#2563EB" : "var(--steel-200)"), background: who.includes(user.id) ? "#DBEAFE" : "#fff" }}>{em} {who.length}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {sel === m.id && (
+                      <div className="chat-actions" onClick={(e) => e.stopPropagation()} style={{ position: "absolute", right: 8, top: -14, background: "#fff", border: "1px solid var(--steel-200)", borderRadius: 10, padding: "3px 6px", display: "flex", gap: 4, boxShadow: "0 6px 16px -8px rgba(0,0,0,.4)", zIndex: 2 }}>
+                        {CHAT_EMOJIS.map((em) => <button key={em} onClick={() => { chat.react(m.id, em); setSel(null); }} style={{ fontSize: 15 }}>{em}</button>)}
+                        <button onClick={() => { setReplyTo(m); setSel(null); if (taRef.current) taRef.current.focus(); }} style={{ fontSize: 12, color: "var(--text-600)", padding: "0 4px" }}>Responder</button>
+                        {mine && <button onClick={() => startEdit(m)} style={{ fontSize: 12, color: "var(--text-600)", padding: "0 4px" }}>Editar</button>}
+                        {mine && <button onClick={() => { if (window.confirm("¿Eliminar este mensaje?")) chat.remove(m.id); setSel(null); }} style={{ fontSize: 12, color: COLORS.red, padding: "0 4px" }}>Eliminar</button>}
+                      </div>
+                    )}
+                  </div>
+                </Fragment>
+              );
+            })}
+            <div ref={endRef} />
+          </div>
+          <div className="px-4 pb-3 pt-2" style={{ background: "#fff", borderTop: "1px solid var(--steel-200)", position: "relative" }}>
+            {replyTo && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#EEF2F7", borderRadius: 8, padding: "5px 10px" }}><span className="flex-1 truncate">Respondiendo a <b>{(AUTH_userById(replyTo.from) || {}).name}</b>: {String(replyTo.text || (replyTo.file && replyTo.file.name) || "").slice(0, 80)}</span><button onClick={() => setReplyTo(null)}><X size={14} /></button></div>}
+            {editing && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#FEF3C7", borderRadius: 8, padding: "5px 10px" }}><span className="flex-1">Editando mensaje</span><button onClick={() => { setEditing(null); setDraft(""); }}><X size={14} /></button></div>}
+            {file && <div className="flex items-center gap-2 mb-2" style={{ fontSize: 12, background: "#EEF2F7", borderRadius: 8, padding: "5px 10px" }}><FileIcon size={14} /><span className="flex-1 truncate">{file.name}</span><button onClick={() => setFile(null)}><X size={14} /></button></div>}
+            {note && <p style={{ fontSize: 12, color: COLORS.red }} className="mb-1">{note}</p>}
+            {mentionOpen && (
+              <div style={{ position: "absolute", bottom: "100%", left: 16, background: "#fff", border: "1px solid var(--steel-200)", borderRadius: 10, boxShadow: "0 10px 24px -12px rgba(0,0,0,.4)", padding: 4, zIndex: 5, minWidth: 220 }}>
+                {[{ tag: "todos", name: "Todos", color: "#64748B" }, ...AUTH_USERS.filter((u) => u.id !== user.id)].map((u) => <button key={u.tag} onClick={() => insertMention(u.tag)} className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded" style={{ fontSize: 13 }}><span style={{ width: 8, height: 8, borderRadius: 9, background: u.color }} />@{u.tag} <span style={{ color: "var(--text-400)", fontSize: 11.5 }}>· {u.name}</span></button>)}
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <label style={{ cursor: "pointer", padding: 8, color: "var(--text-600)" }} title="Adjuntar archivo">{uploading ? "…" : <FileIcon size={20} />}<input type="file" onChange={onFile} style={{ display: "none" }} /></label>
+              <textarea ref={taRef} rows={1} value={draft} onChange={onChange} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !isNarrow) { e.preventDefault(); submit(); } }} placeholder={"Mensaje para " + (ch.kind === "dm" ? ch.name : "#" + ch.name) + "  (usa @ para mencionar)"} className="field" style={{ resize: "none", maxHeight: 120, minHeight: 40 }} />
+              <button onClick={submit} disabled={uploading} className="btn-primary" style={{ height: 40 }}>{editing ? "Guardar" : "Enviar"}</button>
+            </div>
+            <p style={{ fontSize: 10.5, color: "var(--text-400)", marginTop: 4 }}>{isNarrow ? "" : "Enter envía · Shift+Enter nueva línea · "}Toca un mensaje para reaccionar, responder o editar.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* ---------------------------------- app principal ---------------------------------- */
 
 function CP_Module({ projects, updateProject, createProject, deleteProject, focusId, onNewProject }) {
@@ -6957,7 +7490,7 @@ function ResumenModule({ orders, expenses, proyectos, matProjects, actDocs, ali,
   );
 }
 
-function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefreshAll, onOpenSettings }) {
+function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefreshAll, onOpenSettings, user, onLogout, allowed, chatUnread }) {
   const SECTIONS = [
     ["dashboard", "Dashboard", "#0B1530"],
     ["resumen", "Resumen general", "#2563EB"],
@@ -6970,9 +7503,11 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
     ["alimentacion", "Alimentación", "#F59E0B"],
     ["construccion", "Construcción", "#0EA5A4"],
     ["proformas", "Proformas", "#DB2777"],
+    ["chat", "Chat interno", "#6366F1"],
+    ["admin", "Administración", "#64748B"],
   ];
   const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
-  const VISIBLE = ONLY ? SECTIONS.filter((x) => x[0] === ONLY) : SECTIONS;
+  const VISIBLE = SECTIONS.filter((x) => (allowed || []).includes(x[0]) && (!ONLY || x[0] === ONLY));
   return (
     <Fragment>
       {open && <div className="fixed inset-0 z-30 sm:hidden no-print" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} />}
@@ -6992,7 +7527,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
         <nav className="px-3 space-y-1">
           {VISIBLE.map(([key, label, dot]) => (
             <button key={key} onClick={() => { setSection(key); onClose && onClose(); }} className="w-full text-left px-3 py-2 rounded text-sm" style={{ background: section === key ? "linear-gradient(90deg," + dot + "55," + dot + "11)" : "transparent", color: section === key ? "#fff" : "rgba(255,255,255,0.75)", borderLeft: "4px solid " + (section === key ? dot : dot + "66"), fontWeight: section === key ? 600 : 400 }}>
-              {label}
+              {label}{key === "chat" && chatUnread > 0 && <span style={{ marginLeft: 8, background: "#EF4444", color: "#fff", borderRadius: 99, fontSize: 11, padding: "1px 7px", fontWeight: 700 }}>{chatUnread}</span>}
             </button>
           ))}
         </nav>
@@ -7007,6 +7542,7 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
             <button onClick={onRefreshAll} className="text-xs flex items-center gap-1" style={{ color: "var(--ink-sub)" }}><RefreshCw size={12} /> Actualizar todo</button>
             <button onClick={onOpenSettings} className="text-xs" style={{ color: "var(--ink-sub)" }}>Configuración</button>
           </div>
+          {user && <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: "1px solid var(--ink-800)" }}><span className="text-xs truncate" style={{ color: "#fff" }}>{user.name}</span><button onClick={onLogout} className="text-xs" style={{ color: COLORS.amber }}>Cerrar sesión</button></div>}
         </div>
       </aside>
     </Fragment>
@@ -7015,11 +7551,13 @@ function MasterSidebar({ section, setSection, open, onClose, syncStatus, onRefre
 
 /* ---------------------------------- app principal ---------------------------------- */
 
-function App() {
+function App({ user, onLogout, onPasswordChanged }) {
   const [showSettings, setShowSettings] = useState(false);
   const ONLY = (typeof window !== "undefined" && window.__MODULO) || "";
-  const [section, setSectionRaw] = useState(ONLY || "resumen");
-  const setSection = (k) => { if (!ONLY || k === ONLY) setSectionRaw(k); };
+  const allowed = AUTH_allowedKeys(user);
+  const [section, setSectionRaw] = useState(ONLY || (user.role === "obra" ? "construccion" : "resumen"));
+  const setSection = (k) => { if ((!ONLY || k === ONLY) && allowed.includes(k)) setSectionRaw(k); };
+  const chat = useChat(user, section === "chat");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusProjectId, setFocusProjectId] = useState(null);
   const [otNewRequest, setOtNewRequest] = useState(false);
@@ -7250,7 +7788,7 @@ function App() {
           .app-shell{ height:auto; overflow:visible; display:block; background:#fff; }
         }`}</style>
 
-      <MasterSidebar section={section} setSection={setSection} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} syncStatus={syncStatus} onRefreshAll={refreshAll} onOpenSettings={() => setShowSettings(true)} />
+      <MasterSidebar user={user} onLogout={onLogout} allowed={allowed} chatUnread={chat.unread.total} section={section} setSection={setSection} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} syncStatus={syncStatus} onRefreshAll={refreshAll} onOpenSettings={() => setShowSettings(true)} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <div className="sm:hidden flex items-center gap-3 px-4 py-3 no-print" style={{ background: "var(--ink-900)", paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}>
@@ -7258,12 +7796,16 @@ function App() {
           <div style={{ background: "#fff", borderRadius: 7, padding: 3, display: "flex", flexShrink: 0 }}>
             <img src={getLogo()} alt="Logo" style={{ height: 20, width: 20, objectFit: "contain" }} />
           </div>
-          <span className="text-sm font-medium truncate" style={{ color: "#fff", fontFamily: "var(--font-display)" }}>Panel gerencial</span>
+          <span className="text-sm font-medium truncate" style={{ color: "#fff", fontFamily: "var(--font-display)" }}>{user.name}</span>
         </div>
         <main className="flex-1 overflow-y-auto">
-          <div className="p-4 sm:p-8">
+          <div className={section === "chat" ? "" : "p-4 sm:p-8"}>
             {BANNERS[section] && <ModuleBanner title={BANNERS[section][0]} subtitle={BANNERS[section][1]} from={BANNERS[section][2]} to={BANNERS[section][3]} />}
-            {section === "dashboard" ? (
+            {section === "chat" ? (
+              <CHAT_Module user={user} chat={chat} />
+            ) : section === "admin" ? (
+              <ADM_Module user={user} onPasswordChanged={onPasswordChanged} />
+            ) : section === "dashboard" ? (
               <DASH_Module orders={otEnriched} expenses={gasSync.state} proyectos={proyectosSync.state} matProjects={matSync.state.projects} actDocs={actSync.state.docs} ali={aliSync.state} gv={gvSync.state} proformas={proSync.state} />
             ) : section === "construccion" ? (
               <CON_Module projects={proyectosSync.state} orders={otEnriched} updateProject={updateProyecto} />
@@ -7296,7 +7838,7 @@ function App() {
 
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(<AuthGate />);
 </script>
 </body>
 </html>
