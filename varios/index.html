@@ -1330,7 +1330,8 @@ const AUTH_curHash = (id, map) => (map[id] ? map[id].hash : "def");
 function AUTH_allowedKeys(user) {
   if (!user) return [];
   if (user.role === "obra") return AUTH_OBRA_KEYS;
-  const base = ["dashboard", "resumen", "ordenes", "proyectos", "materiales", "actas", "gastos", "varios", "alimentacion", "construccion", "proformas", "chat"];
+  const base = ["dashboard", "resumen", "ordenes", "proyectos", "materiales", "actas", "gastos", "varios", "alimentacion", "construccion", "chat"];
+  if (user.id === "gg" || user.id === "gp") base.splice(base.length - 1, 0, "proformas");
   return user.admin ? [...base, "admin"] : base;
 }
 
@@ -1474,7 +1475,7 @@ function ADM_Module({ user, onPasswordChanged }) {
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: u.color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{u.name[0]}</div>
                   <div style={{ minWidth: 170, flex: "1 1 170px" }}>
                     <p className="text-sm font-semibold" style={{ color: "var(--text-900)" }}>{u.name}</p>
-                    <p className="text-xs" style={{ color: "var(--text-400)" }}>{u.role === "obra" ? "Solo Construcción y Planos y materiales" : "Todos los módulos"}{u.admin ? " · administra accesos" : ""}</p>
+                    <p className="text-xs" style={{ color: "var(--text-400)" }}>{u.role === "obra" ? "Solo Construcción y Planos y materiales" : u.id === "asi" ? "Todos menos Proformas" : "Todos los módulos"}{u.admin ? " · administra accesos" : ""}</p>
                     <p className="text-xs" style={{ color: rec ? COLORS.green : COLORS.amber }}>{rec ? "Personalizada" + (rec.changed ? " · " + fdate(String(rec.changed).slice(0, 10)) : "") : "Usa la contraseña inicial"}</p>
                   </div>
                   <input type="text" className="field" style={{ maxWidth: 200 }} placeholder="Nueva contraseña" value={vals[u.id] || ""} onChange={(e) => setVals((v) => ({ ...v, [u.id]: e.target.value }))} autoComplete="off" />
